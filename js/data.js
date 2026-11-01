@@ -8,24 +8,31 @@ const BORDER = 4;           // non-buildable wilderness around the compound
 const START_BUILDERS = 2;   // simultaneous construction jobs at the start
 const MAX_BUILDERS = 4;
 const BUILDER_COST = [0, 0, 0, 25, 60]; // medals to hire builder #3 and #4
-const MAX_HQ = 5;
+const MAX_HQ = 8;
+const MAX_LEVEL = 8;
 
 // Storage that the Command Center provides on its own, per HQ level.
-const HQ_STORAGE = [0, 1500, 4000, 10000, 25000, 60000];
+const HQ_STORAGE = [0, 1500, 4000, 8000, 15000, 25000, 40000, 60000, 90000];
 
-// How many of each building the player may own, indexed by HQ level (1..5).
+/*
+ * Progression: every Command Center level unlocks exactly one new defense
+ * and raises the level cap of every other building to the HQ level.
+ * Counts below are how many of each building you may own, indexed by HQ level (1..8).
+ */
 const LIMITS = {
-  hq:         [0, 1, 1, 1, 1, 1],
-  goldmine:   [0, 2, 3, 4, 5, 6],
-  steelworks: [0, 1, 2, 3, 4, 5],
-  depot:      [0, 1, 1, 2, 2, 3],
-  mg:         [0, 2, 3, 4, 5, 6],
-  cannon:     [0, 1, 2, 3, 3, 4],
-  mortar:     [0, 0, 1, 1, 2, 3],
-  sniper:     [0, 0, 0, 1, 2, 2],
-  missile:    [0, 0, 0, 0, 1, 2],
-  flame:      [0, 0, 1, 2, 2, 3],
-  wall:       [0, 25, 50, 75, 100, 125],
+  hq:         [0, 1, 1, 1, 1, 1, 1, 1, 1],
+  goldmine:   [0, 2, 2, 3, 3, 4, 4, 5, 5],
+  steelworks: [0, 1, 2, 2, 3, 3, 4, 4, 5],
+  depot:      [0, 1, 1, 2, 2, 2, 3, 3, 4],
+  mg:         [0, 2, 2, 3, 3, 4, 4, 5, 5],
+  cannon:     [0, 0, 1, 2, 2, 3, 3, 4, 4],
+  mortar:     [0, 0, 0, 1, 1, 2, 2, 3, 3],
+  flame:      [0, 0, 0, 0, 1, 2, 2, 3, 3],
+  sniper:     [0, 0, 0, 0, 0, 1, 2, 2, 3],
+  missile:    [0, 0, 0, 0, 0, 0, 1, 2, 2],
+  tesla:      [0, 0, 0, 0, 0, 0, 0, 1, 2],
+  howitzer:   [0, 0, 0, 0, 0, 0, 0, 0, 1],
+  wall:       [0, 20, 40, 60, 80, 100, 120, 140, 160],
 };
 
 // Category order drives the shop tabs.
@@ -40,105 +47,122 @@ const CATEGORIES = [
  *  size    footprint in tiles (square)
  *  max     highest level
  *  cost    cost of reaching level L: base * growth^(L-1)  (or explicit table)
- *  time    seconds to reach level L: base * timeGrowth^(L-1) (0 = instant)
+ *  time    seconds to reach level L: base * growth^(L-1) (0 = instant)
  *  hp      hit points at level L (used by battle mode)
- * Stats for defenses are the numbers battle mode will read.
+ * Defenses unlocked later have a gentler cost curve so their top levels stay reachable.
  */
 const DEFS = {
   hq: {
     name: 'Command Center', code: 'HQ', cat: 'core', size: 3, max: MAX_HQ,
-    desc: 'The heart of your base. Upgrade it to unlock new buildings, more storage and higher building levels.',
-    costTable: [null, { gold: 0, steel: 0 }, { gold: 1000, steel: 500 }, { gold: 3000, steel: 1500 }, { gold: 8000, steel: 4000 }, { gold: 20000, steel: 10000 }],
-    timeTable: [0, 0, 60, 180, 420, 900],
-    hp: { base: 1500, growth: 1.35 },
+    desc: 'The heart of your base. Each level unlocks a new defense and lets every building go one level higher.',
+    costTable: [null, { gold: 0, steel: 0 }, { gold: 800, steel: 400 }, { gold: 2500, steel: 1200 }, { gold: 6000, steel: 3000 },
+      { gold: 12000, steel: 6000 }, { gold: 22000, steel: 11000 }, { gold: 35000, steel: 18000 }, { gold: 55000, steel: 28000 }],
+    timeTable: [0, 0, 30, 120, 300, 600, 1200, 1800, 3600],
+    hp: { base: 1500, growth: 1.3 },
     guard: { dmg: 5, fireRate: 3, range: 5, targets: 'both' }, // rooftop gun that defends in battle
   },
   goldmine: {
-    name: 'Gold Mine', code: 'GM', cat: 'economy', size: 2, max: 5,
+    name: 'Gold Mine', code: 'GM', cat: 'economy', size: 2, max: MAX_LEVEL,
     desc: 'Digs gold over time. Tap it to collect what it has mined.',
-    cost: { base: { steel: 150 }, growth: 2.3 },
-    time: { base: 10, growth: 2.2 },
-    hp: { base: 400, growth: 1.3 },
+    cost: { base: { steel: 150 }, growth: 1.85 },
+    time: { base: 10, growth: 1.7 },
+    hp: { base: 400, growth: 1.25 },
     produces: 'gold',
-    rate: { base: 30, growth: 1.5 },    // per minute
-    hold: { base: 300, growth: 1.9 },   // internal capacity
+    rate: { base: 30, growth: 1.45 },   // per minute
+    hold: { base: 300, growth: 1.75 },  // internal capacity
   },
   steelworks: {
-    name: 'Steel Foundry', code: 'SF', cat: 'economy', size: 2, max: 5,
+    name: 'Steel Foundry', code: 'SF', cat: 'economy', size: 2, max: MAX_LEVEL,
     desc: 'Smelts steel plate for defenses and walls. Tap it to collect.',
-    cost: { base: { gold: 150 }, growth: 2.3 },
-    time: { base: 10, growth: 2.2 },
-    hp: { base: 400, growth: 1.3 },
+    cost: { base: { gold: 150 }, growth: 1.85 },
+    time: { base: 10, growth: 1.7 },
+    hp: { base: 400, growth: 1.25 },
     produces: 'steel',
-    rate: { base: 20, growth: 1.5 },
-    hold: { base: 200, growth: 1.9 },
+    rate: { base: 20, growth: 1.45 },
+    hold: { base: 200, growth: 1.75 },
   },
   depot: {
-    name: 'Supply Depot', code: 'SD', cat: 'economy', size: 2, max: 5,
+    name: 'Supply Depot', code: 'SD', cat: 'economy', size: 2, max: MAX_LEVEL,
     desc: 'Adds storage for both gold and steel.',
-    cost: { base: { gold: 300, steel: 300 }, growth: 2.4 },
-    time: { base: 20, growth: 2.2 },
-    hp: { base: 600, growth: 1.3 },
-    storage: { base: 1500, growth: 2.0 },
+    cost: { base: { gold: 300, steel: 300 }, growth: 1.7 },
+    time: { base: 20, growth: 1.7 },
+    hp: { base: 600, growth: 1.25 },
+    storage: { base: 1500, growth: 1.6 },
   },
   mg: {
-    name: 'Machine Gun Nest', code: 'MG', cat: 'defense', size: 2, max: 5,
+    name: 'Machine Gun Nest', code: 'MG', cat: 'defense', size: 2, max: MAX_LEVEL,
     desc: 'Fast, short-range fire. Shreds infantry and can hit drones.',
-    cost: { base: { gold: 200, steel: 100 }, growth: 2.2 },
-    time: { base: 10, growth: 2.2 },
-    hp: { base: 400, growth: 1.3 },
-    dmg: { base: 4, growth: 1.35 }, fireRate: 6, range: 4.5, targets: 'both',
+    cost: { base: { gold: 200, steel: 100 }, growth: 1.8 },
+    time: { base: 10, growth: 1.7 },
+    hp: { base: 400, growth: 1.25 },
+    dmg: { base: 4, growth: 1.3 }, fireRate: 6, range: 4.5, targets: 'both',
   },
   cannon: {
-    name: 'Cannon', code: 'CN', cat: 'defense', size: 2, max: 5,
+    name: 'Cannon', code: 'CN', cat: 'defense', size: 2, max: MAX_LEVEL,
     desc: 'Heavy rounds with good range. Strong against vehicles.',
-    cost: { base: { gold: 350, steel: 250 }, growth: 2.2 },
-    time: { base: 15, growth: 2.2 },
-    hp: { base: 650, growth: 1.3 },
-    dmg: { base: 60, growth: 1.35 }, fireRate: 0.8, range: 5.5, targets: 'ground',
+    cost: { base: { gold: 350, steel: 250 }, growth: 1.8 },
+    time: { base: 15, growth: 1.7 },
+    hp: { base: 650, growth: 1.25 },
+    dmg: { base: 60, growth: 1.3 }, fireRate: 0.8, range: 5.5, targets: 'ground',
   },
   mortar: {
-    name: 'Mortar Pit', code: 'MT', cat: 'defense', size: 2, max: 5,
+    name: 'Mortar Pit', code: 'MT', cat: 'defense', size: 2, max: MAX_LEVEL,
     desc: 'Lobs shells over walls. Splash damage, but it cannot hit units right next to it.',
-    cost: { base: { gold: 800, steel: 600 }, growth: 2.2 },
-    time: { base: 30, growth: 2.2 },
-    hp: { base: 500, growth: 1.3 },
-    dmg: { base: 45, growth: 1.35 }, fireRate: 0.25, range: 8.5, minRange: 2.5, splash: 1.3, targets: 'ground',
-  },
-  sniper: {
-    name: 'Sniper Tower', code: 'SN', cat: 'defense', size: 2, max: 5,
-    desc: 'Very long range, one precise shot at a time.',
-    cost: { base: { gold: 1500, steel: 1000 }, growth: 2.2 },
-    time: { base: 45, growth: 2.2 },
-    hp: { base: 450, growth: 1.3 },
-    dmg: { base: 160, growth: 1.35 }, fireRate: 0.4, range: 9.5, targets: 'both',
-  },
-  missile: {
-    name: 'Missile Battery', code: 'MB', cat: 'defense', size: 2, max: 5,
-    desc: 'Fires rocket salvos at ground and air targets.',
-    cost: { base: { gold: 3000, steel: 2500 }, growth: 2.2 },
-    time: { base: 60, growth: 2.2 },
-    hp: { base: 700, growth: 1.3 },
-    dmg: { base: 70, growth: 1.35 }, fireRate: 0.9, range: 7.5, splash: 0.8, targets: 'both',
+    cost: { base: { gold: 800, steel: 600 }, growth: 1.75 },
+    time: { base: 30, growth: 1.7 },
+    hp: { base: 500, growth: 1.25 },
+    dmg: { base: 45, growth: 1.3 }, fireRate: 0.25, range: 8.5, minRange: 2.5, splash: 1.3, targets: 'ground',
   },
   flame: {
-    name: 'Flame Bunker', code: 'FB', cat: 'defense', size: 2, max: 5,
+    name: 'Flame Bunker', code: 'FB', cat: 'defense', size: 2, max: MAX_LEVEL,
     desc: 'Short-range flamethrower. Burns groups of infantry at once.',
-    cost: { base: { gold: 600, steel: 400 }, growth: 2.2 },
-    time: { base: 25, growth: 2.2 },
-    hp: { base: 750, growth: 1.3 },
-    dmg: { base: 9, growth: 1.35 }, fireRate: 5, range: 3, splash: 1.0, targets: 'ground',
+    cost: { base: { gold: 1200, steel: 800 }, growth: 1.7 },
+    time: { base: 40, growth: 1.7 },
+    hp: { base: 750, growth: 1.25 },
+    dmg: { base: 12, growth: 1.3 }, fireRate: 5, range: 3, splash: 1.0, targets: 'ground',
+  },
+  sniper: {
+    name: 'Sniper Tower', code: 'SN', cat: 'defense', size: 2, max: MAX_LEVEL,
+    desc: 'Very long range, one precise shot at a time.',
+    cost: { base: { gold: 2500, steel: 1800 }, growth: 1.6 },
+    time: { base: 60, growth: 1.7 },
+    hp: { base: 450, growth: 1.25 },
+    dmg: { base: 160, growth: 1.3 }, fireRate: 0.4, range: 9.5, targets: 'both',
+  },
+  missile: {
+    name: 'Missile Battery', code: 'MB', cat: 'defense', size: 2, max: MAX_LEVEL,
+    desc: 'Fires rocket salvos at ground and air targets.',
+    cost: { base: { gold: 5000, steel: 4000 }, growth: 1.5 },
+    time: { base: 90, growth: 1.7 },
+    hp: { base: 700, growth: 1.25 },
+    dmg: { base: 70, growth: 1.3 }, fireRate: 0.9, range: 7.5, splash: 0.8, targets: 'both',
+  },
+  tesla: {
+    name: 'Tesla Coil', code: 'TC', cat: 'defense', size: 2, max: MAX_LEVEL,
+    desc: 'Lightning that jumps between up to four enemies, ground or air.',
+    cost: { base: { gold: 9000, steel: 7000 }, growth: 1.4 },
+    time: { base: 120, growth: 1.7 },
+    hp: { base: 800, growth: 1.25 },
+    dmg: { base: 90, growth: 1.3 }, fireRate: 1.0, range: 6, chain: 4, targets: 'both',
+  },
+  howitzer: {
+    name: 'Howitzer', code: 'HW', cat: 'defense', size: 2, max: MAX_LEVEL,
+    desc: 'Huge artillery gun. Shells the whole battlefield with massive splash.',
+    cost: { base: { gold: 15000, steel: 12000 }, growth: 1.35 },
+    time: { base: 180, growth: 1.7 },
+    hp: { base: 1000, growth: 1.25 },
+    dmg: { base: 260, growth: 1.3 }, fireRate: 0.2, range: 13, minRange: 3, splash: 2.0, targets: 'ground',
   },
   wall: {
-    name: 'Wall', code: 'WL', cat: 'walls', size: 1, max: 5,
+    name: 'Wall', code: 'WL', cat: 'walls', size: 1, max: MAX_LEVEL,
     desc: 'Blocks the enemy path. Place several in a row; they link together.',
-    cost: { base: { steel: 25 }, growth: 2.5 },
+    cost: { base: { steel: 25 }, growth: 2.0 },
     time: { base: 0, growth: 1 },
-    hp: { base: 300, growth: 1.7 },
+    hp: { base: 300, growth: 1.55 },
   },
 };
 
-const WALL_NAMES = ['', 'Sandbag Wall', 'Concrete Wall', 'Reinforced Wall', 'Steel Wall', 'Fortress Wall'];
+const WALL_NAMES = ['', 'Sandbag Wall', 'Concrete Wall', 'Reinforced Wall', 'Steel Wall', 'Fortress Wall', 'Bastion Wall', 'Titan Wall', 'Citadel Wall'];
 
 function grow(spec, L) {
   return spec.base * Math.pow(spec.growth, L - 1);
@@ -179,10 +203,15 @@ function unlockLevel(type) {
   return 99;
 }
 
-// Highest level a non-HQ building can reach at the current HQ level.
+// The defense a given HQ level unlocks (for the roadmap and upgrade preview).
+function defenseUnlockedAt(L) {
+  return Object.keys(LIMITS).find(t => DEFS[t].cat === 'defense' && LIMITS[t][L] > 0 && LIMITS[t][L - 1] === 0) || null;
+}
+
+// Highest level a non-HQ building can reach: the Command Center's level.
 function levelCap(type, hqLevel) {
   if (type === 'hq') return MAX_HQ;
-  return Math.min(DEFS[type].max, hqLevel + 1);
+  return Math.min(DEFS[type].max, hqLevel);
 }
 
 function displayName(type, level) {
@@ -275,7 +304,9 @@ const MISSIONS = [
   { id: 'boss',     text: 'Destroy a Siege Tank',                   progress: s => [s.stats.bosses, 1], reward: { gold: 1500, medals: 5 } },
   { id: 'kills500', text: 'Destroy 500 enemies',                    progress: s => [s.stats.kills, 500], reward: { medals: 15 } },
   { id: 'wave10',   text: 'Survive wave 10',                        progress: s => [s.bestWave, 10], reward: { medals: 20 } },
-  { id: 'hq5',      text: 'Max out the Command Center',             progress: s => [builtAt(s, 'hq', 5), 1], reward: { medals: 30 } },
+  { id: 'hq5',      text: 'Upgrade the Command Center to level 5',  progress: s => [builtAt(s, 'hq', 5), 1], reward: { medals: 20 } },
+  { id: 'tesla',    text: 'Build a Tesla Coil',                     progress: s => [builtAt(s, 'tesla', 1), 1], reward: { medals: 20 } },
+  { id: 'hq8',      text: 'Max out the Command Center (level 8)',   progress: s => [builtAt(s, 'hq', 8), 1], reward: { medals: 50 } },
 ];
 
 // Supply drops: a crate lands in the base on a timer.

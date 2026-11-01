@@ -2,12 +2,51 @@
 'use strict';
 
 const Sound = (() => {
-  let ac = null, master = null, noiseBuf = null;
+  let ac = null, master = null, noiseBuf = null, keepAlive = null, primed = false;
   const last = {};
   let enabled = true;
 
+  // A tiny silent WAV. Playing it through an <audio> element switches iPhones to the
+  // "playback" audio session, so game sounds are heard even with the ring/silent switch on.
+  function silentWav() {
+    const n = 800, buf = new ArrayBuffer(44 + n * 2), v = new DataView(buf);
+    const w = (o, str) => { for (let i = 0; i < str.length; i++) v.setUint8(o + i, str.charCodeAt(i)); };
+    w(0, 'RIFF'); v.setUint32(4, 36 + n * 2, true); w(8, 'WAVE'); w(12, 'fmt ');
+    v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+    v.setUint32(24, 8000, true); v.setUint32(28, 16000, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+    w(36, 'data'); v.setUint32(40, n * 2, true);
+    let bin = ''; const bytes = new Uint8Array(buf);
+    for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    return 'data:audio/wav;base64,' + btoa(bin);
+  }
+
+  // Must run inside a tap: browsers (iPhone Safari above all) only start audio from a user gesture.
+  function unlock() {
+    if (!enabled) return;
+    init();
+    if (!ac) return;
+    try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (e) { /* older Safari */ }
+    if (ac.state !== 'running') { try { ac.resume(); } catch (e) { /* ignore */ } }
+    if (!primed) {
+      try {
+        const b = ac.createBuffer(1, 1, 22050), src = ac.createBufferSource();
+        src.buffer = b; src.connect(ac.destination); src.start(0);
+        primed = true;
+      } catch (e) { /* ignore */ }
+    }
+    if (!keepAlive) {
+      try {
+        keepAlive = new Audio(silentWav());
+        keepAlive.loop = true;
+        keepAlive.setAttribute('playsinline', '');
+        keepAlive.volume = 0.01;
+      } catch (e) { keepAlive = null; }
+    }
+    if (keepAlive && keepAlive.paused) { const p = keepAlive.play(); if (p && p.catch) p.catch(() => {}); }
+  }
+
   function init() {
-    if (ac) { if (ac.state === 'suspended') ac.resume(); return; }
+    if (ac) return;
     const AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) return;
     try {
@@ -68,31 +107,68 @@ const Sound = (() => {
     lose:    () => { [392, 330, 262, 196].forEach((f, i) => tone(f, 0.25, 'triangle', 0.12, null, i * 0.18)); },
     plane:   () => noise(1.6, 'bandpass', 300, 0.25, 0.4),
     heal:    () => { tone(500, 0.3, 'sine', 0.1, 1000); },
+    zap:     () => { noise(0.18, 'highpass', 3000, 0.25); tone(1800, 0.12, 'sawtooth', 0.05, 400); },
     medal:   () => { tone(1046, 0.1, 'triangle', 0.12); tone(1568, 0.25, 'triangle', 0.12, null, 0.1); },
   };
   // minimum ms between repeats so rapid fire doesn't stack into noise
-  const GAP = { mg: 70, rifle: 90, flame: 120, boom: 60, rocket: 80, collect: 60, mortar: 100, cannon: 60 };
+  const GAP = { mg: 70, rifle: 90, flame: 120, boom: 60, rocket: 80, collect: 60, mortar: 100, cannon: 60, zap: 90 };
 
   function play(name) {
-    if (!enabled || !ac || ac.state !== 'running' || !FX[name]) return;
+    if (!enabled || !ac || !FX[name]) return;
+    if (ac.state !== 'running') { try { ac.resume(); } catch (e) { /* ignore */ } if (ac.state !== 'running') return; }
     const now = performance.now();
     if (now - (last[name] || 0) < (GAP[name] || 30)) return;
     last[name] = now;
     try { FX[name](); } catch (e) { /* ignore */ }
   }
 
-  return { init, play, set enabled(v) { enabled = v; }, get enabled() { return enabled; } };
+  function setEnabled(v) {
+    enabled = v;
+    if (!v && keepAlive) keepAlive.pause();
+  }
+
+  return { unlock, play, set enabled(v) { setEnabled(v); }, get enabled() { return enabled; } };
 })();
 
 let hapticsOn = true;
 let lastBuzz = 0;
+let tickLabel = null;
+
+// iPhones have no vibration API. Safari 18+ gives a haptic tick when a "switch"
+// checkbox is toggled, so tapping a hidden one is the closest thing available.
+function iosTick() {
+  try {
+    if (!tickLabel) {
+      tickLabel = document.createElement('label');
+      tickLabel.setAttribute('aria-hidden', 'true');
+      tickLabel.style.cssText = 'position:fixed;left:-50px;top:0;width:1px;height:1px;opacity:0;overflow:hidden;pointer-events:none';
+      const input = document.createElement('input');
+      input.type = 'checkbox';
+      input.setAttribute('switch', '');
+      input.tabIndex = -1;
+      tickLabel.appendChild(input);
+      document.body.appendChild(tickLabel);
+    }
+    tickLabel.click();
+  } catch (e) { /* unsupported */ }
+}
+
+const canVibrate = typeof navigator.vibrate === 'function';
+
 function buzz(ms) {
-  if (!hapticsOn || !navigator.vibrate) return;
+  if (!hapticsOn) return;
   const now = performance.now();
   if (now - lastBuzz < 120) return;
   lastBuzz = now;
-  try { navigator.vibrate(ms); } catch (e) { /* unsupported */ }
+  if (canVibrate) {
+    try { navigator.vibrate(Array.isArray(ms) ? ms : Math.max(20, ms)); } catch (e) { /* blocked */ }
+  } else {
+    iosTick();
+    if (Array.isArray(ms)) for (let i = 2; i < Math.min(ms.length, 5); i += 2) setTimeout(iosTick, ms.slice(0, i).reduce((a, b) => a + b, 0));
+  }
 }
 
-// Browsers only allow audio after a user gesture.
-window.addEventListener('pointerdown', () => Sound.init(), { capture: true });
+// Unlock audio on every kind of tap; iPhones only count touchend/click as a real gesture.
+for (const ev of ['pointerdown', 'pointerup', 'touchend', 'click', 'keydown']) {
+  window.addEventListener(ev, () => Sound.unlock(), { capture: true, passive: true });
+}

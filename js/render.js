@@ -255,7 +255,7 @@ DRAW.hq = function (ctx, b, t) {
   ctx.save(); rr(ctx, x + 6, y + S - 14, S - 12, 7, 2); ctx.clip();
   for (let i = -2; i < 20; i++) { ctx.fillStyle = i % 2 ? PAL.hazard : PAL.black; ctx.beginPath(); ctx.moveTo(x + i * 10, y + S - 14); ctx.lineTo(x + i * 10 + 10, y + S - 14); ctx.lineTo(x + i * 10 + 3, y + S); ctx.lineTo(x + i * 10 - 7, y + S); ctx.fill(); }
   ctx.restore();
-  const roof = [null, PAL.olive, '#62703d', '#556347', '#4b5a52', '#3f4c55'][L];
+  const roof = [null, PAL.olive, '#62703d', '#556347', '#4b5a52', '#3f4c55', '#45503c', '#3c4634', '#33392b'][L];
   const h = 18 + L * 3;
   box(ctx, x + 14, y + 22, S - 28, S - 46, h, roof, shade(roof, -0.35), 6);
   // roof details
@@ -339,7 +339,7 @@ DRAW.goldmine = function (ctx, b, t) {
 DRAW.steelworks = function (ctx, b, t) {
   const S = 2 * TILE, x = b.x * TILE, y = b.y * TILE, L = Math.max(1, b.level);
   pad(ctx, x, y, S, PAL.concreteDark, 3);
-  const body = [null, '#6c747a', '#68737d', '#5f6d7a', '#566679', '#4c5e75'][L];
+  const body = [null, '#6c747a', '#68737d', '#5f6d7a', '#566679', '#4c5e75', '#45576f', '#3f5069', '#394963'][L];
   box(ctx, x + 8, y + 26, 50, 42, 20, shade(body, 0.12), shade(body, -0.35), 3);
   // corrugated roof lines
   ctx.strokeStyle = 'rgba(0,0,0,0.18)'; ctx.lineWidth = 1;
@@ -423,7 +423,7 @@ DRAW.mg = function (ctx, b, t) {
 
 DRAW.cannon = function (ctx, b, t) {
   const L = Math.max(1, b.level);
-  const col = [null, '#8b8b7d', '#858c8f', '#7a8794', '#6f8298', '#617895'][L];
+  const col = [null, '#8b8b7d', '#858c8f', '#7a8794', '#6f8298', '#617895', '#57708f', '#4e6888', '#455f80'][L];
   const S = 2 * TILE, x = b.x * TILE, y = b.y * TILE;
   // octagon concrete pad
   const pcx = x + S / 2, pcy = y + S / 2 + 2;
@@ -543,10 +543,68 @@ DRAW.flame = function (ctx, b, t) {
   ctx.restore();
 };
 
+DRAW.tesla = function (ctx, b, t) {
+  const S = 2 * TILE, x = b.x * TILE, y = b.y * TILE, L = Math.max(1, b.level);
+  const cx = x + S / 2, cy = y + S / 2;
+  pad(ctx, x, y, S, '#4a4f55', 3);
+  // insulated base
+  ctx.fillStyle = PAL.shadow; ctx.beginPath(); ctx.ellipse(cx + 14, cy + 10, 22, 12, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#2b2f35'; ctx.beginPath(); ctx.ellipse(cx, cy + 12, 22, 14, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#3a4048'; ctx.beginPath(); ctx.ellipse(cx, cy + 8, 22, 14, 0, 0, Math.PI * 2); ctx.fill();
+  // copper coil stack
+  const h = 40 + L * 3;
+  for (let i = 0; i < 9; i++) {
+    const yy = cy + 6 - i * (h / 10), r = 11 - i * 0.5;
+    ctx.fillStyle = i % 2 ? '#b8743a' : '#d98b45';
+    ctx.beginPath(); ctx.ellipse(cx, yy, r, r * 0.45, 0, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.fillStyle = '#20242a'; ctx.fillRect(cx - 2, cy + 6 - h, 4, h - 4);
+  // top sphere
+  const ty = cy + 6 - h;
+  ctx.fillStyle = '#9fb3c8'; ctx.beginPath(); ctx.arc(cx, ty, 10, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#e4f1ff'; ctx.beginPath(); ctx.arc(cx - 3, ty - 3, 4, 0, Math.PI * 2); ctx.fill();
+  // idle sparks
+  const glow = (b._flash > 0 ? 1 : 0.35 + Math.sin(t * 9 + b.id) * 0.25);
+  ctx.strokeStyle = `rgba(150,220,255,${glow})`; ctx.lineWidth = 1.5;
+  const rnd = mulberry(Math.floor(t * 12) + b.id * 31);
+  for (let k = 0; k < 2; k++) {
+    let px = cx, py = ty; ctx.beginPath(); ctx.moveTo(px, py);
+    const a = rnd() * Math.PI * 2;
+    for (let j = 1; j <= 4; j++) { px = cx + Math.cos(a) * j * 5 + (rnd() - 0.5) * 6; py = ty + Math.sin(a) * j * 4 + (rnd() - 0.5) * 6; ctx.lineTo(px, py); }
+    ctx.stroke();
+  }
+  b._top = { x: cx, y: ty };
+};
+
+DRAW.howitzer = function (ctx, b, t) {
+  const S = 2 * TILE, x = b.x * TILE, y = b.y * TILE, L = Math.max(1, b.level);
+  pad(ctx, x, y, S, PAL.concreteDark, 2);
+  ctx.save(); rr(ctx, x + 4, y + S - 10, S - 8, 6, 2); ctx.clip();
+  for (let i = 0; i < 14; i++) { ctx.fillStyle = i % 2 ? PAL.hazard : PAL.black; ctx.fillRect(x + 4 + i * 6, y + S - 10, 6, 6); }
+  ctx.restore();
+  // sandbag corners and shell crates
+  for (const [sx, sy] of [[x + 10, y + 10], [x + S - 10, y + 10]]) {
+    ctx.fillStyle = PAL.sandDark; ctx.beginPath(); ctx.ellipse(sx, sy + 2, 8, 5, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = PAL.sand; ctx.beginPath(); ctx.ellipse(sx, sy, 8, 5, 0, 0, Math.PI * 2); ctx.fill();
+  }
+  box(ctx, x + 6, y + S - 24, 14, 9, 6, '#7d6b3c', '#57492a', 1);
+  const { cx, cy } = turretBase(ctx, b, L >= 5 ? '#5a6a74' : '#646b4a', 10);
+  const recoil = b._flash > 0 ? -6 : 0;
+  ctx.save(); ctx.translate(cx, cy); ctx.rotate(b.angle);
+  ctx.fillStyle = PAL.shadow; ctx.fillRect(8, 2, 44, 9);
+  ctx.fillStyle = '#2b2e25'; rr(ctx, 6 + recoil, -4.5, 40 + L, 9, 3); ctx.fill();
+  ctx.fillStyle = '#1b1d17'; rr(ctx, 40 + L + recoil, -6.5, 9, 13, 2); ctx.fill();
+  ctx.fillStyle = L >= 5 ? '#4c5a63' : '#545b3c'; rr(ctx, -16, -14, 30, 28, 6); ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.12)'; rr(ctx, -14, -12, 26, 10, 4); ctx.fill();
+  ctx.fillStyle = PAL.red; ctx.fillRect(-14, 8, 6, 3);
+  if (b._flash > 0) { ctx.fillStyle = '#ffcf5a'; ctx.beginPath(); ctx.arc(54 + L, 0, 10, 0, Math.PI * 2); ctx.fill(); }
+  ctx.restore();
+};
+
 DRAW.wall = function (ctx, b, t, neighbors) {
   const x = b.x * TILE, y = b.y * TILE, L = Math.max(1, b.level);
   const h = 8 + L * 2;
-  const top = [null, PAL.sand, '#a7a597', '#8f8f84', '#7f8c97', '#5c6670'][L];
+  const top = [null, PAL.sand, '#a7a597', '#8f8f84', '#7f8c97', '#5c6670', '#4d5560', '#40464f', '#33373d'][L];
   const side = shade(top, -0.4);
   const inset = 8;
   const n = neighbors || {};
@@ -564,7 +622,8 @@ DRAW.wall = function (ctx, b, t, neighbors) {
   } else if (L >= 4) {
     ctx.strokeStyle = 'rgba(255,255,255,0.25)'; ctx.lineWidth = 1;
     rr(ctx, tx + 4, ty + 4, w - 8, w - 8, 2); ctx.stroke();
-    if (L === 5) { ctx.fillStyle = PAL.hazard; ctx.fillRect(tx + 2, ty + w - 5, w - 4, 3); }
+    if (L >= 5) { ctx.fillStyle = L >= 7 ? PAL.red : PAL.hazard; ctx.fillRect(tx + 2, ty + w - 5, w - 4, 3); }
+    if (L >= 6) { ctx.fillStyle = '#d8c27a'; for (const [rx, ry] of [[4, 4], [w - 4, 4], [4, w - 8], [w - 4, w - 8]]) { ctx.beginPath(); ctx.arc(tx + rx, ty + ry, 1.4, 0, Math.PI * 2); ctx.fill(); } }
   }
 };
 

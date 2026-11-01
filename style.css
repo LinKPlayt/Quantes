@@ -369,6 +369,36 @@ body.targeting #view { cursor: crosshair; }
 .units.report { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-bottom: 12px; }
 .units small { color: var(--muted); font-weight: 600; margin-left: 4px; }
 
+/* ---------- Progression ---------- */
+.unlock-chip { background: #3b2f12; color: var(--amber); }
+.unlock { display: flex; gap: 18px; align-items: center; }
+.unlock-art {
+  flex: none; width: 150px; height: 150px; display: grid; place-items: center; border-radius: 12px;
+  background: radial-gradient(circle at 50% 60%, #55703a 0, #41582d 70%);
+  box-shadow: inset 0 0 0 2px var(--amber);
+}
+.unlock-text { flex: 1; min-width: 0; }
+.unlock-text .units { margin: 8px 0 12px; }
+.roadmap { list-style: none; margin: 8px 0 12px; padding: 0; display: flex; flex-direction: column; gap: 5px; }
+.road { display: flex; align-items: center; gap: 10px; padding: 5px 10px; border-radius: 8px; background: var(--panel-2); border: 1px solid transparent; }
+.road.done { opacity: 0.6; }
+.road.now { border-color: var(--green); }
+.road.next { border-color: var(--amber); }
+.road.later .road-art canvas { filter: grayscale(0.8) brightness(0.7); }
+.road-lvl {
+  flex: none; width: 28px; height: 28px; display: grid; place-items: center;
+  font-family: var(--font-display); color: var(--ink); background: var(--amber); border-radius: 5px;
+  clip-path: polygon(0 0, 100% 0, 100% 75%, 50% 100%, 0 75%);
+}
+.road.later .road-lvl { background: var(--muted); }
+.road-art { flex: none; width: 44px; height: 44px; display: grid; place-items: center; }
+.road-body { flex: 1; min-width: 0; }
+.road-title { font-family: var(--font-display); font-size: 14px; }
+.road-meta { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.road-cost { display: flex; gap: 8px; font-size: 12px; white-space: nowrap; }
+.road-tag { font-size: 11px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--green); }
+@media (max-width: 760px) { .road-meta { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } }
+
 /* ---------- Toasts ---------- */
 #toasts {
   position: absolute; top: calc(60px + var(--safe-t)); left: 50%; transform: translateX(-50%);

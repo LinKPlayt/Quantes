@@ -160,7 +160,7 @@ function upgradeStatus(b) {
   const cap = levelCap(b.type, hqLevel());
   if (b.job) return { ok: false, reason: 'Already under construction' };
   if (b.level >= DEFS[b.type].max) return { ok: false, max: true, reason: 'Max level' };
-  if (to > cap) return { ok: false, reason: `Needs HQ ${to - 1}`, to, cost: costFor(b.type, to) };
+  if (to > cap) return { ok: false, reason: `Needs HQ level ${to}`, to, cost: costFor(b.type, to) };
   const cost = costFor(b.type, to);
   const time = timeFor(b.type, to);
   if (!canAfford(cost)) return { ok: false, reason: 'Not enough resources', to, cost, time };
@@ -183,15 +183,69 @@ function completeJob(b) {
   Sound.play('done');
   addXP(b.type === 'hq' ? b.level * 40 : b.type === 'wall' ? 0 : b.level * 10);
   toast(b.level === 1 ? `${displayName(b.type, 1)} is ready` : `${displayName(b.type, b.level)} upgraded to level ${b.level}`, 'good');
-  if (b.type === 'hq') toast(hqUnlockText(b.level), 'info');
+  if (b.type === 'hq') { toast(hqUnlockText(b.level), 'info'); showUnlock(b.level); }
   save();
 }
 
 function hqUnlockText(L) {
-  const fresh = Object.keys(LIMITS).filter(t => LIMITS[t][L] > 0 && LIMITS[t][L - 1] === 0).map(t => DEFS[t].name);
-  const parts = [`Storage raised to ${fmt(HQ_STORAGE[L])}`];
-  if (fresh.length) parts.unshift(`Unlocked: ${fresh.join(', ')}`);
+  const d = defenseUnlockedAt(L);
+  const parts = [`Buildings can now reach level ${L}`, `storage ${fmt(HQ_STORAGE[L])}`];
+  if (d) parts.unshift(`Unlocked: ${DEFS[d].name}`);
   return parts.join(' · ');
+}
+
+// Celebrate a new Command Center level with the defense it unlocked.
+function showUnlock(L) {
+  const d = defenseUnlockedAt(L);
+  if (!d || B) return;
+  openModal(`
+    <div class="unlock">
+      <div class="unlock-art"></div>
+      <div class="unlock-text">
+        <span class="stamp">Command Center level ${L}</span>
+        <h2>${DEFS[d].name} unlocked</h2>
+        <p class="lead">${DEFS[d].desc}</p>
+        <ul class="units">
+          <li><span>Building level cap</span><b>${L}</b></li>
+          <li><span>Base storage</span><b>${fmt(HQ_STORAGE[L])}</b></li>
+        </ul>
+        <div class="settings-row">
+          <button class="btn" id="btn-unlock-build">Build one</button>
+          <button class="btn ghost" data-close>Later</button>
+        </div>
+      </div>
+    </div>`);
+  $('.unlock-art').appendChild(renderPreview(d, 1, 130));
+  $('#btn-unlock-build').addEventListener('click', () => { closeModal(); shopTab = 'defense'; startPlacing(d); });
+}
+
+// Every Command Center level at a glance: what it unlocks and what it costs.
+function openRoadmap() {
+  const cur = hqLevel();
+  const rows = [];
+  for (let L = 1; L <= MAX_HQ; L++) {
+    const d = defenseUnlockedAt(L);
+    const c = costFor('hq', L);
+    const state = L < cur ? 'done' : L === cur ? 'now' : L === cur + 1 ? 'next' : 'later';
+    rows.push(`
+      <li class="road ${state}">
+        <div class="road-lvl">${L}</div>
+        <div class="road-art" data-type="${d || ''}"></div>
+        <div class="road-body">
+          <div class="road-title">${d ? DEFS[d].name : 'Command Center'}</div>
+          <div class="road-meta">Level cap ${L} · storage ${fmt(HQ_STORAGE[L])}${L > 1 ? ` · ${fmtTime(timeFor('hq', L))}` : ''}</div>
+        </div>
+        <div class="road-cost">${state === 'done' || state === 'now' ? `<span class="road-tag">${state === 'now' ? 'Current' : 'Done'}</span>` : costHTML(c)}</div>
+      </li>`);
+  }
+  openModal(`
+    <div class="settings">
+      <div class="m-head"><h2>Command Center roadmap</h2><span class="m-count">HQ ${cur} of ${MAX_HQ}</span></div>
+      <p class="lead">Each level unlocks a new defense and lets every other building be upgraded one level higher.</p>
+      <ul class="roadmap">${rows.join('')}</ul>
+      <div class="settings-row"><button class="btn" data-close>Done</button></div>
+    </div>`);
+  $('#modal-body').querySelectorAll('.road-art').forEach(el => { if (el.dataset.type) el.appendChild(renderPreview(el.dataset.type, 1, 44)); });
 }
 
 function upgrade(b) {
@@ -803,7 +857,12 @@ function statChips(b) {
     out.push(`<span class="chip"><b>MINED</b><span data-live="stored">${fmt(b.stored)}</span> / ${fmt(cur.hold)}</span>`);
   }
   if (b.type === 'depot') out.push(chip('STORAGE', '+' + fmt(cur.storage), nxt && '+' + fmt(nxt.storage)));
-  if (b.type === 'hq') out.push(chip('STORAGE', fmt(cur.storage), nxt && fmt(nxt.storage)));
+  if (b.type === 'hq') {
+    out.push(chip('LEVEL CAP', L, nxt ? L + 1 : null));
+    const nd = b.level < MAX_HQ && defenseUnlockedAt(b.level + 1);
+    if (nd && !b.job) out.push(`<span class="chip unlock-chip"><b>NEXT</b>${DEFS[nd].name}</span>`);
+    out.push(chip('STORAGE', fmt(cur.storage), nxt && fmt(nxt.storage)));
+  }
   if (d.dmg) {
     out.push(chip('DPS', cur.dps, nxt && nxt.dps));
     out.push(chip('RANGE', d.range, null));
@@ -870,6 +929,7 @@ function buildPanel(b, up) {
       if (same > 1) actions += `<button class="btn ghost" data-act="walls-all"><span class="btn-main">All ${same}</span><span class="btn-sub">to level ${b.level + 1}</span></button>`;
     }
     actions += `<button class="btn ghost" data-act="move">Move</button>`;
+    if (b.type === 'hq') actions += `<button class="btn ghost" data-act="roadmap">Roadmap</button>`;
     if (b.type !== 'hq') {
       actions += sellArmed
         ? `<button class="btn danger" data-act="sell-confirm"><span class="btn-main">Confirm</span><span class="btn-sub">${costHTML(sellValue(b))}</span></button>`
@@ -902,6 +962,7 @@ panel.addEventListener('click', e => {
   else if (act === 'move') startMove(b);
   else if (act === 'cancel') cancelJob(b);
   else if (act === 'finish') finishNow(b);
+  else if (act === 'roadmap') { openRoadmap(); return; }
   else if (act === 'walls-all') upgradeAllWalls(b.level);
   else if (act === 'sell') { sellArmed = true; }
   else if (act === 'sell-confirm') { sell(b); return; }
@@ -1066,7 +1127,7 @@ $('#btn-menu').addEventListener('click', () => {
         <li><b>Build</b> opens the shop. Drag the outline into place, then tap the check mark.</li>
         <li><b>Tap a building</b> to upgrade, move or sell it. Mines show a bubble when they have something to collect.</li>
         <li><b>Drag</b> to look around and <b>pinch</b> to zoom.</li>
-        <li>Upgrade the <b>Command Center</b> to unlock more buildings and higher levels.</li>
+        <li>Upgrade the <b>Command Center</b>: every level unlocks a new defense and lets your other buildings go one level higher. Tap it and open <b>Roadmap</b> to see all 8 levels.</li>
         <li><b>Battle</b> sends endless enemy waves down the roads. Survive as long as you can; kills and cleared waves pay out, and the base is repaired afterwards.</li>
         <li>Earn <b>medals</b> from battles, missions and promotions. Spend them to finish construction instantly or to hire more builders.</li>
         <li>Your base saves automatically on this device.</li>
@@ -1083,6 +1144,7 @@ $('#btn-menu').addEventListener('click', () => {
   $('#btn-fs').addEventListener('click', toggleFullscreen);
   $('#btn-sound').addEventListener('click', e => {
     S.settings.sound = !S.settings.sound; applySettings(); save();
+    if (S.settings.sound) Sound.unlock();
     e.currentTarget.textContent = `Sound: ${S.settings.sound ? 'On' : 'Off'}`; e.currentTarget.classList.toggle('on', S.settings.sound);
     Sound.play('click');
   });
@@ -1113,7 +1175,7 @@ function applySettings() {
 function upgradeAllWalls(level) {
   const list = S.buildings.filter(w => w.type === 'wall' && w.level === level && !w.job);
   const to = level + 1;
-  if (to > levelCap('wall', hqLevel())) { toast(`Walls above level ${level} need HQ ${level}`, 'bad'); Sound.play('error'); return; }
+  if (to > levelCap('wall', hqLevel())) { toast(`Walls above level ${level} need Command Center level ${to}`, 'bad'); Sound.play('error'); return; }
   const cost = costFor('wall', to);
   let n = 0;
   for (const w of list) { if (!canAfford(cost)) break; pay(cost); w.level = to; n++; }

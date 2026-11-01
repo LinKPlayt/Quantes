@@ -490,6 +490,32 @@ function updateDefense(b, dt) {
         B.shots.push({ kind: 'rocket', x: mx, y: my, tx: t.x, ty: t.y, target: t, speed: 8 * TILE, dmg: w.dmg, splash: w.splash, air: true, wobble: off, age: 0, src: 'missile' });
       }
       break;
+    case 'tesla': {
+      // lightning jumps to the nearest enemy not yet hit, losing a little power each jump
+      Sound.play('zap');
+      const top = b._top || { x: c.x, y: c.y - 50 };
+      let from = top, cur = t, power = w.dmg;
+      const hit = new Set();
+      for (let j = 0; j < (DEFS.tesla.chain || 4) && cur; j++) {
+        hit.add(cur);
+        const to = { x: cur.x, y: cur.y - (cur.air ? 18 : 4) };
+        B.fx.push({ kind: 'bolt', x1: from.x, y1: from.y, x2: to.x, y2: to.y, life: 0.16, seed: Math.random() * 1000 });
+        damageEnemy(cur, power, 'tesla');
+        from = to; power *= 0.8;
+        let next = null, nd = 2.6 * TILE;
+        for (const u of B.units) {
+          if (u.hp <= 0 || hit.has(u)) continue;
+          const d = Math.hypot(u.x - cur.x, u.y - cur.y);
+          if (d < nd) { nd = d; next = u; }
+        }
+        cur = next;
+      }
+      break;
+    }
+    case 'howitzer':
+      Sound.play('cannon'); buzz(25);
+      B.shots.push({ kind: 'mortar', x: c.x, y: c.y, sx: c.x, sy: c.y, tx: t.x, ty: t.y, t: 0, dur: 1.9, arc: 220, dmg: w.dmg, splash: w.splash, air: false, src: 'howitzer', big: true });
+      break;
     case 'flame': {
       Sound.play('flame');
       // a cone of fire: everything near the target takes damage
@@ -518,7 +544,7 @@ function updateShot(p, dt) {
         damageBuilding(p.bTarget, p.dmg);
         B.fx.push({ kind: 'boom', x: p.tx, y: p.ty, r: 14, life: 0.3, max: 0.3 });
       } else {
-        if (p.kind === 'bomb') { Sound.play('bigboom'); buzz(40); }
+        if (p.kind === 'bomb' || p.big) { Sound.play('bigboom'); buzz(40); }
         splashDamage(p.tx, p.ty, p.splash, p.dmg, p.air, p.src);
         explosion(p.tx, p.ty, p.splash * TILE * 0.9);
       }
@@ -628,6 +654,20 @@ function drawBattleAir(ctx) {
       ctx.strokeStyle = f.color; ctx.lineWidth = f.width || 1.5; ctx.globalAlpha = 0.9;
       ctx.beginPath(); ctx.moveTo(f.x1, f.y1); ctx.lineTo(f.x2, f.y2); ctx.stroke();
       ctx.globalAlpha = 1;
+    } else if (f.kind === 'bolt') {
+      const rnd = mulberry(Math.floor(f.seed + f.life * 60));
+      const n = 6;
+      ctx.lineCap = 'round';
+      for (const [wid, col] of [[5, 'rgba(120,200,255,0.35)'], [2, '#eaf8ff']]) {
+        ctx.strokeStyle = col; ctx.lineWidth = wid;
+        ctx.beginPath(); ctx.moveTo(f.x1, f.y1);
+        for (let i = 1; i < n; i++) {
+          const k = i / n;
+          ctx.lineTo(f.x1 + (f.x2 - f.x1) * k + (rnd() - 0.5) * 14, f.y1 + (f.y2 - f.y1) * k + (rnd() - 0.5) * 14);
+        }
+        ctx.lineTo(f.x2, f.y2); ctx.stroke();
+      }
+      ctx.lineCap = 'butt';
     } else if (f.kind === 'ring') {
       const k = 1 - f.life / f.max;
       ctx.strokeStyle = `rgba(${f.color},${(1 - k) * 0.9})`; ctx.lineWidth = 3;
@@ -750,7 +790,7 @@ function drawShot(ctx, p) {
     const h = p.h || 0;
     ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.beginPath(); ctx.ellipse(p.x, p.y, 4, 2, 0, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = p.kind === 'mortar' ? '#2b2e25' : '#3a1610';
-    ctx.beginPath(); ctx.arc(p.x, p.y - h, p.kind === 'mortar' ? 4 + h / 60 : 3, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(p.x, p.y - h, p.kind === 'mortar' ? (p.big ? 6 : 4) + h / 60 : 3, 0, Math.PI * 2); ctx.fill();
   } else if (p.kind === 'rocket') {
     ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.a || 0);
     ctx.fillStyle = '#d9d6c6'; ctx.fillRect(-5, -1.5, 10, 3);
