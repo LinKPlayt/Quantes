@@ -48,6 +48,7 @@ const DEFS = {
     costTable: [null, { gold: 0, steel: 0 }, { gold: 1000, steel: 500 }, { gold: 3000, steel: 1500 }, { gold: 8000, steel: 4000 }, { gold: 20000, steel: 10000 }],
     timeTable: [0, 0, 60, 180, 420, 900],
     hp: { base: 1500, growth: 1.35 },
+    guard: { dmg: 5, fireRate: 3, range: 5, targets: 'both' }, // rooftop gun that defends in battle
   },
   goldmine: {
     name: 'Gold Mine', code: 'GM', cat: 'economy', size: 2, max: 5,
@@ -79,11 +80,11 @@ const DEFS = {
   },
   mg: {
     name: 'Machine Gun Nest', code: 'MG', cat: 'defense', size: 2, max: 5,
-    desc: 'Fast, short-range fire. Shreds infantry.',
+    desc: 'Fast, short-range fire. Shreds infantry and can hit drones.',
     cost: { base: { gold: 200, steel: 100 }, growth: 2.2 },
     time: { base: 10, growth: 2.2 },
     hp: { base: 400, growth: 1.3 },
-    dmg: { base: 4, growth: 1.35 }, fireRate: 6, range: 4.5, targets: 'ground',
+    dmg: { base: 4, growth: 1.35 }, fireRate: 6, range: 4.5, targets: 'both',
   },
   cannon: {
     name: 'Cannon', code: 'CN', cat: 'defense', size: 2, max: 5,
@@ -178,12 +179,40 @@ function displayName(type, level) {
   return DEFS[type].name;
 }
 
-// Preview of what battle mode will send at a given wave number.
+/*
+ * Enemy roster. Speeds and ranges are in tiles; rate is attacks per second.
+ * Hit points grow with each wave (see enemyHp).
+ */
+const ENEMIES = {
+  rifleman:  { name: 'Rifleman',     hp: 55,  speed: 1.0,  dmg: 5,  rate: 1.0,  range: 2.2, bounty: 4,  r: 6 },
+  grenadier: { name: 'Grenadier',    hp: 95,  speed: 0.85, dmg: 22, rate: 0.5,  range: 2.8, splash: 0.9, bounty: 7, r: 7 },
+  jeep:      { name: 'Armored Jeep', hp: 260, speed: 1.7,  dmg: 8,  rate: 2.5,  range: 3.0, bounty: 15, r: 11, vehicle: true },
+  tank:      { name: 'Light Tank',   hp: 850, speed: 0.55, dmg: 60, rate: 0.35, range: 4.0, splash: 0.7, bounty: 40, r: 14, vehicle: true },
+  drone:     { name: 'Attack Drone', hp: 110, speed: 1.5,  dmg: 12, rate: 1.0,  range: 1.4, bounty: 12, r: 9, air: true },
+};
+
+function enemyHp(type, wave) {
+  return Math.round(ENEMIES[type].hp * (1 + 0.14 * (wave - 1)));
+}
+
+// The force sent at a given wave number.
 function waveComposition(n) {
-  const list = [{ unit: 'Rifleman', count: 6 + n * 2 }];
-  if (n >= 2) list.push({ unit: 'Grenadier', count: Math.floor(n * 0.8) });
-  if (n >= 3) list.push({ unit: 'Armored Jeep', count: Math.floor(n / 2) });
-  if (n >= 5) list.push({ unit: 'Light Tank', count: Math.floor((n - 3) / 2) });
-  if (n >= 7) list.push({ unit: 'Attack Drone', count: Math.floor((n - 5) / 2) });
+  const list = [{ type: 'rifleman', count: 6 + n * 2 }];
+  if (n >= 2) list.push({ type: 'grenadier', count: Math.floor(n * 0.8) });
+  if (n >= 3) list.push({ type: 'jeep', count: Math.floor(n / 2) });
+  if (n >= 5) list.push({ type: 'tank', count: Math.floor((n - 3) / 2) });
+  if (n >= 7) list.push({ type: 'drone', count: Math.floor((n - 5) / 2) });
   return list;
+}
+
+// Which roads the enemy uses at a given wave.
+function waveGates(n) {
+  if (n <= 1) return ['w'];
+  if (n <= 3) return ['w', 'e'];
+  return ['w', 'e', 'n'];
+}
+
+// Bonus paid for clearing a wave (on top of per-kill bounties).
+function waveReward(n) {
+  return { gold: 60 + n * 45, steel: 40 + n * 30 };
 }

@@ -272,6 +272,36 @@ button:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
 .settings-row { display: flex; gap: 8px; flex-wrap: wrap; }
 .settings-row .btn { min-height: 44px; }
 
+/* ---------- Battle ---------- */
+.battle-only { display: none !important; }
+body.in-battle .battle-only { display: flex !important; }
+body.in-battle #btn-build, body.in-battle #btn-battle, body.in-battle #btn-menu,
+body.in-battle #builders, body.in-battle #panel { display: none !important; }
+#btn-speed { left: max(10px, var(--safe-l)); background: var(--panel-2); color: var(--bone); border: 1px solid var(--line); font-size: 12px; }
+#btn-retreat { right: max(10px, var(--safe-r)); background: var(--panel-2); color: #ff8a73; border: 1px solid var(--red); font-size: 13px; }
+#battle-hud {
+  position: absolute; bottom: calc(10px + var(--safe-b)); left: 50%; transform: translateX(-50%);
+  gap: 6px; align-items: stretch;
+}
+.bh-wave { flex-direction: column; align-items: center; justify-content: center; padding: 4px 12px; display: flex; min-width: 62px; }
+.bh-wave span:last-child { font-family: var(--font-display); font-size: 22px; line-height: 1; font-variant-numeric: tabular-nums; }
+.bh-label { font-size: 9px; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); }
+.bh-mid { display: flex; flex-direction: column; justify-content: center; gap: 4px; padding: 6px 12px; width: min(260px, 40vw); }
+.bh-hq { display: flex; align-items: center; gap: 8px; }
+.bh-hq .bar { flex: 1; height: 8px; margin: 0; }
+#bh-hq { width: 100%; background: var(--green); }
+#bh-status { font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
+#banner {
+  position: absolute; top: 34%; left: 0; right: 0; z-index: 15; pointer-events: none;
+  display: flex; flex-direction: column; align-items: center; gap: 2px; text-align: center;
+  padding: 10px max(16px, var(--safe-r)) 10px max(16px, var(--safe-l));
+  background: linear-gradient(90deg, transparent, rgba(15, 18, 12, 0.85) 25%, rgba(15, 18, 12, 0.85) 75%, transparent);
+}
+#banner.show { animation: bannerIn 2.6s ease forwards; }
+.bn-title { font-family: var(--font-display); font-size: 30px; letter-spacing: 0.04em; color: var(--amber); text-shadow: 0 2px 0 rgba(0, 0, 0, 0.6); }
+.bn-sub { font-weight: 600; color: var(--bone); }
+@keyframes bannerIn { 0% { opacity: 0; transform: scale(1.15); } 10% { opacity: 1; transform: scale(1); } 80% { opacity: 1; } 100% { opacity: 0; } }
+
 /* ---------- Toasts ---------- */
 #toasts {
   position: absolute; top: calc(60px + var(--safe-t)); left: 50%; transform: translateX(-50%);

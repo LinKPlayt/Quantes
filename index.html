@@ -64,6 +64,25 @@
     <span>Battle</span>
   </button>
 
+  <button id="btn-speed" class="big-btn battle-only">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 4l7 6-7 6zM10 4l7 6-7 6z" fill="currentColor"/></svg>
+    <span>Speed x1</span>
+  </button>
+  <button id="btn-retreat" class="big-btn battle-only">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 3v15" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M6 4h10l-3 3.5 3 3.5H6z" fill="currentColor"/></svg>
+    <span>Retreat</span>
+  </button>
+
+  <div id="battle-hud" class="battle-only">
+    <div class="bh-wave hud-box"><span class="bh-label">Wave</span><span id="bh-wave">1</span></div>
+    <div class="bh-mid hud-box">
+      <div class="bh-hq"><span class="bh-label">HQ</span><div class="bar"><div class="fill" id="bh-hq"></div></div></div>
+      <div id="bh-status">Get ready</div>
+    </div>
+    <div class="bh-wave hud-box"><span class="bh-label">Kills</span><span id="bh-kills">0</span></div>
+  </div>
+  <div id="banner" hidden></div>
+
   <section id="panel" hidden></section>
 
   <div id="place-ctrl" hidden>
@@ -103,6 +122,7 @@
 </div>
 <script src="js/data.js"></script>
 <script src="js/render.js"></script>
+<script src="js/battle.js"></script>
 <script src="js/game.js"></script>
 </body>
 </html>

@@ -417,7 +417,7 @@ DRAW.mg = function (ctx, b, t) {
   rr(ctx, -9, -8, 18, 16, 4); ctx.fill();
   ctx.fillStyle = '#7d6b3c'; ctx.fillRect(-4, 6, 8, 5); // ammo box
   ctx.fillStyle = shade(PAL.olive, 0.1); ctx.beginPath(); ctx.arc(-3, 0, 4.5, 0, Math.PI * 2); ctx.fill(); // gunner helmet
-  if (b.flash > 0) { ctx.fillStyle = '#ffd36b'; ctx.beginPath(); ctx.arc(30 + L, 0, 4, 0, Math.PI * 2); ctx.fill(); }
+  if (b._flash > 0) { ctx.fillStyle = '#ffd36b'; ctx.beginPath(); ctx.arc(30 + L, 0, 4, 0, Math.PI * 2); ctx.fill(); }
   ctx.restore();
 };
 
@@ -438,7 +438,7 @@ DRAW.cannon = function (ctx, b, t) {
   ctx.fillStyle = shade(col, -0.2); ctx.beginPath(); ctx.arc(0, 0, 15, 0, Math.PI * 2); ctx.fill();
   ctx.fillStyle = shade(col, 0.15); ctx.beginPath(); ctx.arc(-2, -2, 11, 0, Math.PI * 2); ctx.fill();
   ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.fillRect(-8, -1, 8, 2);
-  if (b.flash > 0) { ctx.fillStyle = '#ffcf5a'; ctx.beginPath(); ctx.arc(40 + L * 2, 0, 7, 0, Math.PI * 2); ctx.fill(); }
+  if (b._flash > 0) { ctx.fillStyle = '#ffcf5a'; ctx.beginPath(); ctx.arc(40 + L * 2, 0, 7, 0, Math.PI * 2); ctx.fill(); }
   ctx.restore();
 };
 
@@ -547,6 +547,24 @@ function drawBuilding(ctx, b, t, neighbors) {
     drawFoundation(ctx, b);
   } else {
     f(ctx, b, t, neighbors);
+  }
+}
+
+// What is left of a building destroyed in battle.
+function drawRubble(ctx, b) {
+  const S = DEFS[b.type].size * TILE, x = b.x * TILE, y = b.y * TILE;
+  const rnd = mulberry(b.id * 97 + 3);
+  ctx.fillStyle = 'rgba(20,18,14,0.55)';
+  ctx.beginPath(); ctx.ellipse(x + S / 2, y + S / 2, S * 0.48, S * 0.42, 0, 0, Math.PI * 2); ctx.fill();
+  const n = b.type === 'wall' ? 4 : 10 + S / 8;
+  for (let i = 0; i < n; i++) {
+    const px = x + S * (0.15 + rnd() * 0.7), py = y + S * (0.15 + rnd() * 0.7), r = 2 + rnd() * (S / 12);
+    ctx.fillStyle = rnd() < 0.5 ? '#6f6b60' : '#4a463e';
+    ctx.beginPath(); ctx.moveTo(px - r, py + r * 0.5); ctx.lineTo(px, py - r); ctx.lineTo(px + r, py + r * 0.3); ctx.closePath(); ctx.fill();
+  }
+  if (b.type !== 'wall') {
+    ctx.strokeStyle = '#2a2520'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(x + S * 0.3, y + S * 0.6); ctx.lineTo(x + S * 0.55, y + S * 0.35); ctx.moveTo(x + S * 0.5, y + S * 0.7); ctx.lineTo(x + S * 0.72, y + S * 0.5); ctx.stroke();
   }
 }
 

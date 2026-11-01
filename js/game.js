@@ -31,7 +31,8 @@ function newBase() {
 
 function serialize() {
   S.saved = Date.now();
-  return JSON.stringify(S);
+  // fields starting with "_" are runtime-only (battle damage, aim, etc.)
+  return JSON.stringify(S, (k, v) => (k[0] === '_' ? undefined : v));
 }
 
 function save() {
@@ -423,6 +424,7 @@ function hitsGhost(w) {
 }
 
 function tap(sx, sy) {
+  if (B) return;
   const w = screenToWorld(sx, sy);
   if (placing) {
     const n = DEFS[placing.type].size;
@@ -485,11 +487,12 @@ function update(dt) {
       const st = statsFor(b.type, b.level);
       b.stored = Math.min(st.hold, b.stored + (st.rate / 60) * dt);
     }
-    if (d.cat === 'defense') b.angle = b.baseAngle + Math.sin(tSec * 0.45 + b.id * 1.7) * 1.1;
+    if (d.cat === 'defense' && !B) b.angle = b.baseAngle + Math.sin(tSec * 0.45 + b.id * 1.7) * 1.1;
     if (b.type === 'steelworks' && b.level >= 1 && b._chimney && Math.random() < dt * 4) {
       particles.push({ x: b._chimney.x + (Math.random() - 0.5) * 4, y: b._chimney.y, vx: 8 + Math.random() * 10, vy: -18 - Math.random() * 10, g: 0, life: 2.4, max: 2.4, r: 4, grow: 5, color: 'smoke' });
     }
   }
+  if (B) battleUpdate(dt * B.speed);
   for (const p of particles) { p.life -= dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vy += p.g * dt; if (p.grow) p.r += p.grow * dt; }
   particles = particles.filter(p => p.life > 0);
   for (const f of floaters) { f.life -= dt; f.y -= 30 * dt; }
@@ -515,10 +518,12 @@ function draw() {
     let nb = null;
     if (b.type === 'wall') {
       const r = buildingAtTile(b.x + 1, b.y), d = buildingAtTile(b.x, b.y + 1);
-      nb = { r: r && r.type === 'wall' && r.level >= 1 && !(placing && placing.moveId === r.id), d: d && d.type === 'wall' && d.level >= 1 && !(placing && placing.moveId === d.id) };
+      const link = o => o && o.type === 'wall' && o.level >= 1 && !o._dead && !(placing && placing.moveId === o.id);
+      nb = { r: link(r), d: link(d) };
     }
+    if (b._dead) { drawRubble(ctx, b); continue; }
     drawBuilding(ctx, b, tSec, nb);
-    if (b.job) {
+    if (b.job && !B) {
       drawScaffold(ctx, b, tSec);
       const c = centerOf(b), n = DEFS[b.type].size * TILE;
       const p = clamp((Date.now() - b.job.start) / (b.job.end - b.job.start), 0, 1);
@@ -526,10 +531,11 @@ function draw() {
     }
   }
 
+  drawBattleGround(ctx);
   if (placing) drawGhost();
 
   // collection bubbles
-  if (!placing) for (const b of S.buildings) {
+  if (!placing && !B) for (const b of S.buildings) {
     if (!hasBubble(b)) continue;
     const p = bubblePos(b);
     ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.beginPath(); ctx.arc(p.x + 2, p.y + 3, 15, 0, Math.PI * 2); ctx.fill();
@@ -541,11 +547,13 @@ function draw() {
 
   for (const p of particles) {
     const a = clamp(p.life / p.max, 0, 1);
-    ctx.globalAlpha = p.color === 'smoke' ? a * 0.45 : a;
-    ctx.fillStyle = p.color === 'smoke' ? '#cfcabb' : p.color;
+    const smoke = p.color === 'smoke' || p.color === 'smoke-dark';
+    ctx.globalAlpha = smoke ? a * 0.45 : a;
+    ctx.fillStyle = p.color === 'smoke' ? '#cfcabb' : p.color === 'smoke-dark' ? '#3a3632' : p.color;
     ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.fill();
   }
   ctx.globalAlpha = 1;
+  drawBattleAir(ctx);
   for (const f of floaters) {
     ctx.globalAlpha = clamp(f.life / f.max * 1.5, 0, 1);
     ctx.font = '22px "Black Ops One", Impact, sans-serif';
@@ -626,6 +634,7 @@ function frame(now) {
   update(dt);
   draw();
   updateHUD();
+  updateBattleHUD();
   if (placing) positionPlaceCtrl();
   if (now - lastPanel > 250) { lastPanel = now; refreshPanel(); }
   if (now - lastSave > 4000) { lastSave = now; save(); }
@@ -903,11 +912,18 @@ $('#btn-build').addEventListener('click', openShop);
 /* ----- Modals: battle briefing, settings ----- */
 
 const modal = $('#modal');
-function openModal(html) {
+let modalOnClose = null;
+function openModal(html, onClose) {
   $('#modal-body').innerHTML = html;
   modal.hidden = false;
+  modalOnClose = onClose || null;
 }
-function closeModal() { modal.hidden = true; }
+function closeModal() {
+  if (modal.hidden) return;
+  modal.hidden = true;
+  const f = modalOnClose; modalOnClose = null;
+  if (f) f();
+}
 modal.addEventListener('click', e => {
   if (e.target === modal || e.target.closest('[data-close]')) closeModal();
 });
@@ -924,19 +940,20 @@ function defenseRating() {
 
 $('#btn-battle').addEventListener('click', () => {
   if (placing) cancelPlace();
-  const wave = S.bestWave + 1;
+  if (B) return;
+  const wave = 1;
   const r = defenseRating();
-  const comp = waveComposition(wave).map(u => `<li><span>${u.unit}</span><b>&times;${u.count}</b></li>`).join('');
+  const comp = waveComposition(wave).map(u => `<li><span>${ENEMIES[u.type].name}</span><b>&times;${u.count}</b></li>`).join('');
   openModal(`
     <div class="brief">
       <div class="brief-head">
         <span class="stamp">Intel report</span>
-        <h2>Wave ${wave} incoming</h2>
-        <p>Hostile forces are massing on the west and east roads. Survive each wave to earn gold and steel.</p>
+        <h2>Hold the line</h2>
+        <p>Enemy waves will keep coming down the roads, each one bigger than the last. Every kill and every wave you survive pays out gold and steel. Damage is repaired after the battle.</p>
       </div>
       <div class="brief-cols">
         <div>
-          <h3>Enemy force</h3>
+          <h3>First wave</h3>
           <ul class="units">${comp}</ul>
         </div>
         <div>
@@ -945,15 +962,17 @@ $('#btn-battle').addEventListener('click', () => {
             <li><span>Turrets</span><b>${r.towers}</b></li>
             <li><span>Firepower</span><b>${r.dps} DPS</b></li>
             <li><span>Wall segments</span><b>${r.walls}</b></li>
+            <li><span>Best wave survived</span><b>${S.bestWave || 0}</b></li>
           </ul>
         </div>
       </div>
       <div class="brief-foot">
-        <button class="btn battle-go off" disabled>Deploy</button>
-        <span class="soon">Battle mode arrives in the next update. Keep fortifying.</span>
+        <button class="btn battle-go" id="btn-deploy">Start battle</button>
+        <span class="soon">Tip: walls slow the enemy down while your turrets fire.</span>
         <button class="btn ghost" data-close>Back to base</button>
       </div>
     </div>`);
+  $('#btn-deploy').addEventListener('click', startBattle);
 });
 
 $('#btn-menu').addEventListener('click', () => {
@@ -965,6 +984,7 @@ $('#btn-menu').addEventListener('click', () => {
         <li><b>Tap a building</b> to upgrade, move or sell it. Mines show a bubble when they have something to collect.</li>
         <li><b>Drag</b> to look around and <b>pinch</b> to zoom.</li>
         <li>Upgrade the <b>Command Center</b> to unlock more buildings and higher levels.</li>
+        <li><b>Battle</b> sends endless enemy waves down the roads. Survive as long as you can; kills and cleared waves pay out, and the base is repaired afterwards.</li>
         <li>Your base saves automatically on this device.</li>
       </ul>
       <div class="settings-row">
@@ -1028,6 +1048,7 @@ function start(hotData) {
   S = saved || newBase();
   if (saved) applyOffline((Date.now() - (S.saved || Date.now())) / 1000);
   rebuildGrid();
+  initBattleUI();
   resize();
   recenter();
   ground = buildGroundCanvas(1.5);
