@@ -608,6 +608,35 @@ DRAW.howitzer = function (ctx, b, t) {
   ctx.restore();
 };
 
+DRAW.lab = function (ctx, b, t) {
+  const S = 2 * TILE, x = b.x * TILE, y = b.y * TILE, L = Math.max(1, b.level);
+  pad(ctx, x, y, S, '#8d9096', 3);
+  // main block
+  box(ctx, x + 8, y + 30, 46, 40, 16, '#c9ccd0', '#7e8389', 4);
+  ctx.fillStyle = 'rgba(0,0,0,0.12)'; ctx.fillRect(x + 8, y + 22, 46, 3);
+  // glass dome with a glowing experiment
+  const dx = x + 31, dy = y + 22;
+  const g = ctx.createRadialGradient(dx - 4, dy - 6, 2, dx, dy, 15);
+  g.addColorStop(0, 'rgba(220,245,255,0.95)'); g.addColorStop(1, 'rgba(110,180,220,0.75)');
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(dx, dy, 13, Math.PI, 0); ctx.fill();
+  ctx.fillStyle = '#5e646b'; ctx.fillRect(dx - 14, dy - 1, 28, 3);
+  const pulse = 0.5 + Math.sin(t * 3 + b.id) * 0.4;
+  ctx.fillStyle = `rgba(127,255,170,${pulse})`; ctx.beginPath(); ctx.arc(dx, dy - 5, 4, 0, Math.PI * 2); ctx.fill();
+  // windows
+  for (let i = 0; i < 3; i++) { ctx.fillStyle = 'rgba(110,190,255,0.75)'; ctx.fillRect(x + 13 + i * 13, y + 56, 8, 6); }
+  // dish antenna on a mast
+  const mx = x + 64, my = y + 26;
+  ctx.strokeStyle = '#4a4f55'; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.moveTo(mx, my + 30); ctx.lineTo(mx, my); ctx.stroke();
+  ctx.save(); ctx.translate(mx, my); ctx.rotate(Math.sin(t * 0.6 + b.id) * 0.5 - 0.6);
+  ctx.fillStyle = '#e4e6e8'; ctx.beginPath(); ctx.ellipse(0, 0, 10, 5, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = '#9aa0a6'; ctx.lineWidth = 1; ctx.stroke();
+  ctx.fillStyle = '#c8402a'; ctx.beginPath(); ctx.arc(0, 0, 1.6, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+  // level stripes on the door
+  ctx.fillStyle = '#3a3f45'; rr(ctx, x + 50, y + 54, 6, 12, 1); ctx.fill();
+  ctx.fillStyle = L >= 6 ? PAL.hazard : '#7fbf4d'; ctx.fillRect(x + 50, y + 52, 6, 2);
+};
+
 DRAW.flak = function (ctx, b, t) {
   const S = 2 * TILE, x = b.x * TILE, y = b.y * TILE, L = Math.max(1, b.level);
   pad(ctx, x, y, S, '#5c6152', 3);
@@ -745,7 +774,7 @@ DRAW.wall = function (ctx, b, t, neighbors) {
 
 function drawBuilding(ctx, b, t, neighbors) {
   const f = DRAW[b.type];
-  if (b.level === 0) {
+  if (b.level === 0 || !f) {
     drawFoundation(ctx, b);
   } else {
     f(ctx, b, t, neighbors);

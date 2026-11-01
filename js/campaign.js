@@ -23,12 +23,50 @@ function missionEnemyTypes(m) {
 
 function modTags(m) {
   const tags = [];
+  if (m.modNames) return m.modNames.map(x => `${x.name}: ${x.desc}`);
   if (m.mods && m.mods.fast) tags.push(`Enemies ${Math.round((m.mods.fast - 1) * 100)}% faster`);
   if (m.mods && m.mods.armored) tags.push(`Enemies ${Math.round((m.mods.armored - 1) * 100)}% tougher`);
   if (m.mods && m.mods.noAirstrike) tags.push('No airstrikes');
   if (m.waves.some(w => w.some(g => ENEMIES[g.type].boss))) tags.push('Boss');
   if (m.waves.some(w => w.some(g => ENEMIES[g.type].air))) tags.push('Air units');
   return tags;
+}
+
+/* ---------------- Daily challenge ---------------- */
+// The same challenge for everyone on a given day, scaled to your Command Center.
+function dailySeed() { const k = dayKey(); let h = 2166136261; for (const ch of k) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619); } return h >>> 0; }
+function makeDaily() {
+  const rnd = mulberry(dailySeed());
+  const pool = DAILY_POOLS[Math.floor(rnd() * DAILY_POOLS.length)];
+  const modA = DAILY_MODS[Math.floor(rnd() * DAILY_MODS.length)];
+  let modB = DAILY_MODS[Math.floor(rnd() * DAILY_MODS.length)];
+  if (modB.id === modA.id) modB = DAILY_MODS[(DAILY_MODS.indexOf(modA) + 1) % DAILY_MODS.length];
+  const L = hqLevel();
+  const waves = [];
+  for (let w = 0; w < 5; w++) {
+    const wave = [];
+    for (const t of pool.types) {
+      if (ENEMIES[t].boss) continue;
+      const base = ENEMIES[t].hp > 400 ? 1 : ENEMIES[t].hp > 150 ? 2 : 5;
+      const n = Math.round(base * (0.6 + w * 0.45) * (0.6 + rnd() * 0.8));
+      if (n > 0) wave.push({ type: t, count: n });
+    }
+    if (w === 4 && L >= 4) wave.push({ type: 'siege', count: 1 });
+    waves.push(wave);
+  }
+  const mods = Object.assign({}, modA.mods, modB.mods);
+  const cap = storageCap();
+  return {
+    id: 'daily', daily: true, name: `Daily: ${pool.name}`, hq: L, level: Math.max(1, L * 2 - 1), gates: ['w', 'e', 'n'], mods,
+    modNames: [modA, modB],
+    brief: `Today's challenge: ${pool.name.toLowerCase()} with special rules. ${modA.name}: ${modA.desc.toLowerCase()}. ${modB.name}: ${modB.desc.toLowerCase()}.`,
+    waves, reward: { gold: Math.round(cap * 0.15 / 10) * 10, steel: Math.round(cap * 0.15 / 10) * 10, medals: 8 },
+  };
+}
+function dailyDone() { return S.daily && S.daily.done === dayKey(); }
+function timeToReset() {
+  const n = new Date(), t = new Date(n); t.setHours(24, 0, 0, 0);
+  return fmtTime((t - n) / 1000);
 }
 
 /* ---------------- Operation map ---------------- */
@@ -60,9 +98,16 @@ function openCampaign() {
         <span class="m-count">${starRow(1, 1)} ${totalStars()} / ${CAMPAIGN.length * 3}</span>
       </div>
       <p class="lead">Twelve missions against a growing enemy offensive. Each one is a fixed set of waves at your own base. Clear a mission to unlock the next. Stars depend on how much of your Command Center survives.</p>
+      <button class="daily-card ${dailyDone() ? 'done' : ''}" id="btn-daily">
+        <span class="daily-tag">Daily challenge</span>
+        <span class="daily-name">${makeDaily().name.replace('Daily: ', '')}</span>
+        <span class="daily-mods">${makeDaily().modNames.map(m => `<span>${m.name}</span>`).join('')}</span>
+        <span class="daily-meta">${dailyDone() ? `Done for today. New challenge in ${timeToReset()}` : `+8 medals · resets in ${timeToReset()}`}</span>
+      </button>
       <div class="op-track">${cards}</div>
       <div class="settings-row"><button class="btn ghost" data-close>Back to base</button></div>
     </div>`);
+  $('#btn-daily').addEventListener('click', () => { Sound.play('click'); openMissionBrief(-1); });
   const track = $('.op-track');
   track.querySelectorAll('[data-mission]').forEach(el => el.addEventListener('click', () => {
     const i = +el.dataset.mission;
@@ -75,17 +120,17 @@ function openCampaign() {
 }
 
 function openMissionBrief(i) {
-  const m = CAMPAIGN[i];
-  const stars = missionStars(m.id);
-  const r = stars ? replayReward(m) : m.reward;
+  const m = i < 0 ? makeDaily() : CAMPAIGN[i];
+  const stars = m.daily ? 0 : missionStars(m.id);
+  const r = m.daily ? (dailyDone() ? { gold: 0, steel: 0, medals: 0 } : m.reward) : stars ? replayReward(m) : m.reward;
   const enemies = missionEnemyTypes(m).map(([t, n]) => `<li class="ms-enemy"><span class="ms-art" data-type="${t}"></span><span>${ENEMIES[t].name}</span><b>&times;${n}</b></li>`).join('');
   const tags = modTags(m).map(t => `<span>${t}</span>`).join('');
   const under = hqLevel() < m.hq;
   openModal(`
     <div class="brief">
       <div class="brief-head">
-        <span class="stamp">Mission ${i + 1} of ${CAMPAIGN.length}</span>
-        <h2>${m.name} ${starRow(stars)}</h2>
+        <span class="stamp">${m.daily ? 'Daily challenge' : `Mission ${i + 1} of ${CAMPAIGN.length}`}</span>
+        <h2>${m.name} ${m.daily ? '' : starRow(stars)}</h2>
         <p>${m.brief}</p>
         ${tags ? `<div class="intel-tags ms-tags">${tags}</div>` : ''}
       </div>
@@ -95,7 +140,7 @@ function openMissionBrief(i) {
           <ul class="units ms-list">${enemies}</ul>
         </div>
         <div>
-          <h3>${stars ? 'Replay reward' : 'Reward'}</h3>
+          <h3>${m.daily && dailyDone() ? 'Already claimed today' : stars ? 'Replay reward' : 'Reward'}</h3>
           <ul class="units">
             ${r.gold ? `<li><span>Gold</span><b>+${fmt(r.gold)}</b></li>` : ''}
             ${r.steel ? `<li><span>Steel</span><b>+${fmt(r.steel)}</b></li>` : ''}
@@ -131,24 +176,25 @@ function endMission(reason) {
   const h = hq();
   const frac = h && h._maxhp ? Math.max(0, h._hp / h._maxhp) : 0;
   const won = reason === 'victory';
-  const prev = missionStars(m.id);
+  const prev = m.daily ? 0 : missionStars(m.id);
   let stars = 0, reward = null, firstClear = false;
   if (won) {
     stars = campaignStars(frac);
-    firstClear = !prev;
-    reward = firstClear ? m.reward : replayReward(m);
+    firstClear = m.daily ? !dailyDone() : !prev;
+    reward = m.daily ? (firstClear ? m.reward : { gold: 0, steel: 0, medals: 0 }) : firstClear ? m.reward : replayReward(m);
+    if (m.daily) S.daily.done = dayKey();
     const cap = storageCap();
     const g = Math.min(reward.gold || 0, Math.max(0, cap - S.gold)), st = Math.min(reward.steel || 0, Math.max(0, cap - S.steel));
     S.gold += g; S.steel += st; S.medals += reward.medals || 0;
     reward = { gold: g, steel: st, medals: reward.medals || 0 };
-    campaignState().stars[m.id] = Math.max(prev, stars);
-    addXP(firstClear ? 60 + i * 20 : 20);
+    if (!m.daily) campaignState().stars[m.id] = Math.max(prev, stars);
+    addXP(firstClear ? 60 + Math.max(0, i) * 20 : 20);
     buzz([60, 40, 60]);
   } else {
     Sound.play('lose');
   }
   save();
-  const next = CAMPAIGN[i + 1];
+  const next = m.daily ? null : CAMPAIGN[i + 1];
   const title = won ? 'Mission complete' : reason === 'retreat' ? 'Mission aborted' : 'Mission failed';
   const line = won
     ? `${m.name} is secure. The Command Center finished at ${Math.round(frac * 100)}% strength.`
@@ -181,12 +227,12 @@ function endMission(reason) {
       <div class="brief-foot">
         ${won && next ? '<button class="btn" id="btn-next-mission">Next mission</button>' : ''}
         ${!won ? '<button class="btn" id="btn-retry-mission">Try again</button>' : ''}
-        <span class="soon">${won && !next ? 'Operation Iron Line is complete. Outstanding work, Commander.' : ''}</span>
+        <span class="soon">${won && !next && !m.daily ? 'Operation Iron Line is complete. Outstanding work, Commander.' : won && m.daily ? 'Daily challenge cleared. A new one arrives tomorrow.' : ''}</span>
         <button class="btn ghost" data-close>Return to base</button>
       </div>
     </div>`, leaveBattle);
   const nx = $('#btn-next-mission');
   if (nx) nx.addEventListener('click', () => { closeModal(); openMissionBrief(i + 1); });
   const rt = $('#btn-retry-mission');
-  if (rt) rt.addEventListener('click', () => { closeModal(); openMissionBrief(i); });
+  if (rt) rt.addEventListener('click', () => { closeModal(); openMissionBrief(m.daily ? -1 : i); });
 }

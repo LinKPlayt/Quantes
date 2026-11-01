@@ -40,6 +40,11 @@ function migrate(s) {
   if (s.nextDrop == null) s.nextDrop = Date.now() + FIRST_DROP_DELAY;
   if (s.bestWave == null) s.bestWave = 0;
   if (!s.campaign) s.campaign = { stars: {} };
+  if (!s.research) s.research = { levels: {}, job: null };
+  if (!s.heroes) s.heroes = { active: 'commando' };
+  if (!s.login) s.login = { day: -1, last: '' };
+  if (!s.daily) s.daily = { done: '' };
+  if (s.tut == null) s.tut = (s.bestWave > 0 || s.buildings.length > 6) ? 99 : 0;
   return s;
 }
 
@@ -170,7 +175,7 @@ function upgradeStatus(b) {
 }
 
 function startJob(b, to) {
-  const time = timeFor(b.type, to);
+  const time = Math.round(timeFor(b.type, to) * (1 - researchBonus('engineering')));
   if (time <= 0) { b.level = to; return; }
   const now = Date.now();
   b.job = { to, start: now, end: now + time * 1000 };
@@ -296,6 +301,7 @@ function sell(b) {
 
 // Collect from every mine and foundry in one tap.
 function collectAll() {
+  tutorialEvent('collect');
   let g = 0, st = 0, any = false;
   for (const b of S.buildings) {
     if (!hasBubble(b)) continue;
@@ -381,6 +387,7 @@ function confirmPlace() {
   if (!st.ok) { toast(st.reason, 'bad'); placing = null; showPlaceCtrl(false); return; }
   pay(st.cost);
   Sound.play('build');
+  tutorialEvent('build');
   const b = { id: S.nextId++, type, x: placing.x, y: placing.y, level: 0, job: null, stored: 0, baseAngle: Math.random() * Math.PI * 2 };
   S.buildings.push(b);
   startJob(b, 1);
@@ -597,12 +604,13 @@ function update(dt) {
   tSec += dt;
   const now = Date.now();
   if (!S.drop && now >= S.nextDrop && !B) spawnDrop();
+  if (S.research.job && now >= S.research.job.end) finishResearch();
   for (const b of S.buildings) {
     if (b.job && now >= b.job.end && !B) completeJob(b);
     const d = DEFS[b.type];
     if (d.produces && b.level >= 1) {
       const st = statsFor(b.type, b.level);
-      b.stored = Math.min(st.hold, b.stored + (st.rate / 60) * dt);
+      b.stored = Math.min(st.hold, b.stored + (st.rate * (1 + researchBonus('logistics')) / 60) * dt);
     }
     if (d.cat === 'defense' && !B) b.angle = b.baseAngle + Math.sin(tSec * 0.45 + b.id * 1.7) * 1.1;
     if (b.type === 'steelworks' && b.level >= 1 && b._chimney && Math.random() < dt * 4) {
@@ -712,6 +720,14 @@ function draw() {
   if (placing) drawGhost();
 
   // collection bubbles
+  for (const b of S.buildings) {
+    if (!b.spec || b._dead || (placing && placing.moveId === b.id)) continue;
+    const bx = b.x * TILE + 8, by = (b.y + DEFS[b.type].size) * TILE - 8;
+    ctx.fillStyle = 'rgba(16,18,12,0.85)'; ctx.beginPath(); ctx.arc(bx, by, 6, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = SPECS[b.spec].color; ctx.beginPath();
+    for (let i = 0; i < 4; i++) { const a = i * Math.PI / 2; ctx.lineTo(bx + Math.cos(a) * 4.5, by + Math.sin(a) * 4.5); ctx.lineTo(bx + Math.cos(a + Math.PI / 4) * 1.8, by + Math.sin(a + Math.PI / 4) * 1.8); }
+    ctx.fill();
+  }
   if (S.drop && !B) drawSupplyCrate(ctx, (S.drop.x + 0.5) * TILE, (S.drop.y + 0.5) * TILE, tSec);
   if (!placing && !B) for (const b of S.buildings) {
     if (!hasBubble(b)) continue;
@@ -813,14 +829,19 @@ function drawGhost() {
 function frame(now) {
   const dt = Math.min(0.1, (now - lastFrame) / 1000);
   lastFrame = now;
-  update(dt);
-  updateAmbient(dt);
-  frameDt = dt;
-  draw();
-  updateHUD();
-  updateBattleHUD();
-  if (placing) positionPlaceCtrl();
-  if (now - lastPanel > 250) { lastPanel = now; refreshPanel(); }
+  // one bad frame must never stop the game loop
+  try {
+    update(dt);
+    updateAmbient(dt);
+    frameDt = dt;
+    draw();
+    updateHUD();
+    updateBattleHUD();
+    if (placing) positionPlaceCtrl();
+    if (now - lastPanel > 250) { lastPanel = now; refreshPanel(); }
+  } catch (e) {
+    if (!frame.warned) { frame.warned = true; console.error(e); }
+  }
   if (now - lastSave > 4000) { lastSave = now; save(); }
   requestAnimationFrame(frame);
 }
@@ -879,6 +900,9 @@ function updateHUD() {
   const next = RANKS[ri + 1];
   const xpPct = next ? ((S.xp - RANKS[ri].xp) / (next.xp - RANKS[ri].xp) * 100).toFixed(1) : '100';
   if (hudCache.xp !== xpPct) { hudCache.xp = xpPct; $('#hq-badge .xp-fill').style.width = xpPct + '%'; }
+  const gift = loginClaimable();
+  if (hudCache.gift !== gift) { hudCache.gift = gift; $('#btn-gift').classList.toggle('has-dot', gift); }
+  updateTutorial();
   const ready = claimableMissions();
   setText($('#btn-missions .dot'), 'mdot', ready ? String(ready) : '');
   const anyBubble = !B && !placing && S.buildings.some(hasBubble);
@@ -935,8 +959,15 @@ function statChips(b) {
     out.push(`<span class="chip"><b>EFFECT</b>${b.type === 'wire' ? 'Slows infantry 60%' : 'One use per battle'}</span>`);
   } else if (d.dmg) {
     out.push(chip('DPS', cur.dps, nxt && nxt.dps));
-    out.push(chip('RANGE', d.range, null));
-    out.push(chip('HITS', d.targets === 'both' ? 'Ground + Air' : 'Ground', null));
+    out.push(chip('RANGE', b.spec === 'scope' ? +(d.range * 1.25).toFixed(1) : d.range, null));
+    out.push(chip('HITS', d.targets === 'both' ? 'Ground + Air' : d.targets === 'air' ? 'Air only' : 'Ground', null));
+    if (b.level >= 1) {
+      const pr = PRIORITIES.find(p => p.id === (b.priority || 'close'));
+      out.push(`<button class="chip chip-btn" data-act="priority"><b>TARGET</b>${pr.name}</button>`);
+      if (b.spec) out.push(`<span class="chip spec-chip" style="--sc:${SPECS[b.spec].color}"><b>SPEC</b>${SPECS[b.spec].name}</span>`);
+      else if (b.level >= SPEC_LEVEL) out.push(`<button class="chip chip-btn spec-ready" data-act="spec"><b>NEW</b>Choose specialization</button>`);
+      else out.push(`<span class="chip"><b>SPEC</b>at level ${SPEC_LEVEL}</span>`);
+    }
   }
   out.push(chip('HP', fmt(cur.hp), nxt && fmt(nxt.hp)));
   return out.join('');
@@ -1000,6 +1031,7 @@ function buildPanel(b, up) {
     }
     actions += `<button class="btn ghost" data-act="move">Move</button>`;
     if (b.type === 'hq') actions += `<button class="btn ghost" data-act="roadmap">Roadmap</button>`;
+    if (b.type === 'lab' && b.level >= 1) actions += `<button class="btn medal-btn" data-act="research"><span class="btn-main">Research</span><span class="btn-sub">${S.research.job ? fmtTime((S.research.job.end - Date.now()) / 1000) : 'Ready'}</span></button>`;
     if (b.type !== 'hq') {
       actions += sellArmed
         ? `<button class="btn danger" data-act="sell-confirm"><span class="btn-main">Confirm</span><span class="btn-sub">${costHTML(sellValue(b))}</span></button>`
@@ -1033,6 +1065,13 @@ panel.addEventListener('click', e => {
   else if (act === 'cancel') cancelJob(b);
   else if (act === 'finish') finishNow(b);
   else if (act === 'roadmap') { openRoadmap(); return; }
+  else if (act === 'research') { openResearch(); return; }
+  else if (act === 'spec') { openSpec(b); return; }
+  else if (act === 'priority') {
+    const i = PRIORITIES.findIndex(p => p.id === (b.priority || 'close'));
+    b.priority = PRIORITIES[(i + 1) % PRIORITIES.length].id;
+    Sound.play('click'); save();
+  }
   else if (act === 'walls-all') upgradeAllOf(b.type, b.level);
   else if (act === 'sell') { sellArmed = true; }
   else if (act === 'sell-confirm') { sell(b); return; }
@@ -1209,6 +1248,7 @@ $('#btn-menu').addEventListener('click', () => {
         <button class="btn ghost toggle ${S.settings.haptics ? 'on' : ''}" id="btn-haptics">Vibration: ${S.settings.haptics ? 'On' : 'Off'}</button>
         <button class="btn ghost" id="btn-fs">Fullscreen</button>
         <button class="btn ghost" id="btn-recenter">Recenter view</button>
+        <button class="btn ghost" id="btn-record">Service record</button>
         <button class="btn danger-outline" id="btn-reset">Reset base</button>
         <button class="btn" data-close>Done</button>
       </div>
@@ -1226,6 +1266,7 @@ $('#btn-menu').addEventListener('click', () => {
     buzz(30);
   });
   $('#btn-recenter').addEventListener('click', () => { recenter(); closeModal(); });
+  $('#btn-record').addEventListener('click', openRecord);
   const reset = $('#btn-reset');
   reset.addEventListener('click', () => {
     if (reset.dataset.armed) {
@@ -1407,6 +1448,202 @@ function recenter() {
   clampCam();
 }
 
+/* ---------------- Research Lab ---------------- */
+function researchLevel(id) { return (S.research && S.research.levels[id]) || 0; }
+function researchBonus(id) { return researchLevel(id) * RESEARCH[id].per; }
+function labLevel() { const l = S.buildings.find(b => b.type === 'lab'); return l ? l.level : 0; }
+
+function researchStatus(id) {
+  const cur = researchLevel(id), to = cur + 1, r = RESEARCH[id];
+  if (cur >= r.max) return { ok: false, max: true, reason: 'Fully researched' };
+  if (to > labLevel()) return { ok: false, reason: `Needs Research Lab level ${to}`, to, cost: researchCost(id, to) };
+  if (S.research.job) return { ok: false, reason: 'The lab is busy', to, cost: researchCost(id, to) };
+  const cost = researchCost(id, to);
+  if (!canAfford(cost)) return { ok: false, reason: 'Not enough resources', to, cost };
+  return { ok: true, to, cost, time: Math.round(researchTime(to) * (1 - researchBonus('engineering'))) };
+}
+
+function startResearch(id) {
+  const st = researchStatus(id);
+  if (!st.ok) { toast(st.reason, 'bad'); Sound.play('error'); return; }
+  pay(st.cost);
+  const now = Date.now();
+  S.research.job = { id, to: st.to, start: now, end: now + st.time * 1000 };
+  Sound.play('build'); save();
+  openResearch();
+}
+
+function finishResearch() {
+  const j = S.research.job;
+  S.research.levels[j.id] = j.to;
+  S.research.job = null;
+  toast(`${RESEARCH[j.id].name} level ${j.to} complete`, 'good');
+  Sound.play('done'); addXP(15 * j.to); save();
+  if (!modal.hidden && $('#research-list')) openResearch();
+}
+
+function openResearch() {
+  const j = S.research.job;
+  const items = Object.keys(RESEARCH).map(id => {
+    const r = RESEARCH[id], lv = researchLevel(id), st = researchStatus(id);
+    const running = j && j.id === id;
+    let action;
+    if (running) {
+      const fc = Math.max(1, Math.ceil((j.end - Date.now()) / 60000));
+      action = `<div class="rs-run"><span>${fmtTime((j.end - Date.now()) / 1000)}</span><button class="btn medal-btn ${S.medals >= fc ? '' : 'off'}" data-finish-research><span class="btn-main">Finish</span><span class="btn-sub">${ICON.medal}${fc}</span></button></div>`;
+    } else if (st.max) action = '<span class="road-tag">Maxed</span>';
+    else action = `<button class="btn ${st.ok ? '' : 'off'}" data-research="${id}"><span class="btn-main">Level ${st.to}</span><span class="btn-sub">${st.ok ? costHTML(st.cost) + `<span class="cost">${ICON.clock}${fmtTime(st.time)}</span>` : (st.reason === 'Not enough resources' ? costHTML(st.cost) : st.reason)}</span></button>`;
+    const pips = Array.from({ length: r.max }, (_, i) => `<i class="${i < lv ? 'on' : ''}"></i>`).join('');
+    return `
+      <li class="rs ${running ? 'running' : ''}">
+        <div class="rs-body">
+          <div class="rs-name">${r.name}</div>
+          <div class="rs-desc">${r.desc} per level</div>
+          <div class="rs-pips">${pips}</div>
+        </div>
+        ${action}
+      </li>`;
+  }).join('');
+  openModal(`
+    <div class="settings">
+      <div class="m-head"><h2>Research Lab</h2><span class="m-count">Lab level ${labLevel()} · one project at a time</span></div>
+      <p class="lead">Research gives permanent bonuses to your whole base. Upgrade the lab to research higher levels.</p>
+      <ul class="research" id="research-list">${items}</ul>
+      <div class="settings-row"><button class="btn" data-close>Done</button></div>
+    </div>`);
+  $('#modal-body').querySelectorAll('[data-research]').forEach(b => b.addEventListener('click', () => startResearch(b.dataset.research)));
+  const fin = $('[data-finish-research]');
+  if (fin) fin.addEventListener('click', () => {
+    const fc = Math.max(1, Math.ceil((S.research.job.end - Date.now()) / 60000));
+    if (S.medals < fc) { toast(`You need ${fc} medals`, 'bad'); Sound.play('error'); return; }
+    S.medals -= fc; finishResearch();
+  });
+}
+
+/* ---------------- Specializations ---------------- */
+function specCost(b) {
+  const c = costFor(b.type, SPEC_LEVEL);
+  return { gold: Math.round(c.gold * 0.6 / 10) * 10, steel: Math.round(c.steel * 0.6 / 10) * 10 };
+}
+function openSpec(b) {
+  const cost = specCost(b);
+  const opts = Object.keys(SPECS).map(k => `
+    <button class="spec-opt" data-spec="${k}" style="--sc:${SPECS[k].color}">
+      <span class="spec-gem"></span>
+      <span class="spec-name">${SPECS[k].name}</span>
+      <span class="spec-desc">${SPECS[k].desc}</span>
+    </button>`).join('');
+  openModal(`
+    <div class="settings">
+      <div class="m-head"><h2>Specialize ${DEFS[b.type].name}</h2><span class="m-count">${costHTML(cost)}</span></div>
+      <p class="lead">Pick one permanent upgrade for this ${DEFS[b.type].name}. You can't change it later, so think about what it's up against.</p>
+      <div class="spec-row">${opts}</div>
+      <div class="settings-row"><button class="btn ghost" data-close>Not now</button></div>
+    </div>`);
+  $('#modal-body').querySelectorAll('[data-spec]').forEach(el => el.addEventListener('click', () => {
+    if (!canAfford(cost)) { toast('Not enough resources', 'bad'); Sound.play('error'); return; }
+    pay(cost); b.spec = el.dataset.spec;
+    Sound.play('done'); toast(`${DEFS[b.type].name}: ${SPECS[b.spec].name}`, 'good');
+    const c = centerOf(b); burst(c.x, c.y, SPECS[b.spec].color, 18);
+    save(); closeModal(); select(b.id);
+  }));
+}
+
+/* ---------------- Daily login rewards ---------------- */
+function dayKey(d = new Date()) { return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`; }
+function yesterdayKey() { const d = new Date(); d.setDate(d.getDate() - 1); return dayKey(d); }
+function loginClaimable() { return S.login.last !== dayKey(); }
+function loginNextDay() { return S.login.last === yesterdayKey() ? (S.login.day + 1) % 7 : 0; }
+function loginReward(i) {
+  const r = LOGIN_REWARDS[i], k = Math.max(1, hqLevel() * 0.75);
+  return { gold: Math.round((r.gold || 0) * k / 10) * 10, steel: Math.round((r.steel || 0) * k / 10) * 10, medals: r.medals || 0 };
+}
+function openLogin() {
+  const can = loginClaimable();
+  const today = can ? loginNextDay() : S.login.day;
+  const days = LOGIN_REWARDS.map((_, i) => {
+    const r = loginReward(i);
+    const state = i < today || (!can && i === today) ? 'got' : i === today ? 'now' : '';
+    return `<div class="day ${state}">
+      <div class="day-n">Day ${i + 1}</div>
+      <div class="day-r">${rewardText(r)}</div>
+      ${state === 'got' ? '<div class="day-tick">&#10003;</div>' : ''}
+    </div>`;
+  }).join('');
+  openModal(`
+    <div class="settings">
+      <div class="m-head"><h2>Daily supply</h2><span class="m-count">Log in every day for bigger rewards</span></div>
+      <div class="days">${days}</div>
+      <p class="lead">${can ? 'Today\'s supplies are ready.' : 'Come back tomorrow for the next delivery.'} Missing a day starts the week over.</p>
+      <div class="settings-row">${can ? '<button class="btn" id="btn-claim-login">Claim</button>' : ''}<button class="btn ghost" data-close>${can ? 'Later' : 'Close'}</button></div>
+    </div>`);
+  const b = $('#btn-claim-login');
+  if (b) b.addEventListener('click', () => {
+    const i = loginNextDay(), r = loginReward(i), cap = storageCap();
+    S.gold = Math.min(cap, S.gold + r.gold); S.steel = Math.min(cap, S.steel + r.steel); S.medals += r.medals;
+    S.login = { day: i, last: dayKey() };
+    Sound.play('medal'); buzz(30);
+    toast(`Day ${i + 1} supplies collected`, 'good');
+    pulseRes('gold'); pulseRes('steel'); save(); openLogin();
+  });
+}
+
+/* ---------------- Service record ---------------- */
+function openRecord() {
+  const st = S.stats;
+  const stars = Object.values((S.campaign || {}).stars || {}).reduce((a, b) => a + b, 0);
+  const res = Object.keys(RESEARCH).reduce((a, k) => a + researchLevel(k), 0);
+  const heroes = Object.keys(HEROES).filter(heroUnlocked).map(id => `${HEROES[id].name} L${heroState(id).level}`).join(', ');
+  const rows = [
+    ['Rank', RANKS[rankIndex(S.xp)].name], ['Command Center', `Level ${hqLevel()}`], ['Best endless wave', S.bestWave || 0],
+    ['Battles fought', st.battles || 0], ['Waves cleared', st.wavesCleared || 0], ['Enemies destroyed', fmt(st.kills || 0)],
+    ['Siege Tanks destroyed', st.bosses || 0], ['Airstrikes called', st.airstrikes || 0], ['Campaign stars', `${stars} / ${CAMPAIGN.length * 3}`],
+    ['Research levels', res], ['Gold mined', fmt(st.collectedGold || 0)], ['Heroes', heroes || 'None'],
+  ].map(([k, v]) => `<li><span>${k}</span><b>${v}</b></li>`).join('');
+  openModal(`
+    <div class="settings">
+      <div class="m-head"><h2>Service record</h2><span class="m-count">${S.name}</span></div>
+      <ul class="units report record">${rows}</ul>
+      <div class="settings-row"><button class="btn" data-close>Done</button></div>
+    </div>`);
+}
+
+/* ---------------- First-time tutorial ---------------- */
+const TUTORIAL = [
+  { target: '#btn-collect', text: 'Your mines have been busy. Tap to collect everything.', on: 'collect' },
+  { target: '#btn-build', text: 'Open Build and place a second Machine Gun Nest.', on: 'build' },
+  { target: '#btn-battle', text: 'Ready? Start a battle. Tap the map to move your hero.', on: 'battle' },
+  { target: '#btn-campaign', text: 'Campaign missions pay big rewards. Take a look.', on: 'campaign' },
+];
+function tutorialEvent(ev) {
+  if (S.tut == null || S.tut >= TUTORIAL.length) return;
+  if (TUTORIAL[S.tut].on === ev) { S.tut++; if (S.tut >= TUTORIAL.length) S.tut = 99; save(); }
+}
+let tutEl = null, tutTarget = null;
+function updateTutorial() {
+  const step = S.tut != null && S.tut < TUTORIAL.length ? TUTORIAL[S.tut] : null;
+  const tgt = step && !B && modal.hidden && shop.hidden && !placing && !selectedId ? document.querySelector(step.target) : null;
+  const visible = tgt && !tgt.hidden && tgt.offsetParent !== null;
+  if (tutTarget && tutTarget !== tgt) tutTarget.classList.remove('tut-pulse');
+  if (!tutEl) tutEl = $('#tut');
+  if (!visible) {
+    // skip the collect step when there is nothing to collect
+    if (step && step.on === 'collect' && !S.buildings.some(hasBubble) && !B) { S.tut++; save(); }
+    tutEl.hidden = true; tutTarget = null; return;
+  }
+  tutTarget = tgt;
+  tgt.classList.add('tut-pulse');
+  if (tutEl.dataset.step !== String(S.tut)) { tutEl.dataset.step = String(S.tut); tutEl.querySelector('.tut-text').textContent = step.text; }
+  tutEl.hidden = false;
+  const r = tgt.getBoundingClientRect(), w = tutEl.offsetWidth, h = tutEl.offsetHeight;
+  const x = clamp(r.left + r.width / 2 - w / 2, 8, vw - w - 8);
+  const above = r.top - h - 14 > 50;
+  const y = above ? r.top - h - 12 : r.bottom + 12;
+  tutEl.style.transform = `translate(${x | 0}px, ${y | 0}px)`;
+  tutEl.classList.toggle('below', !above);
+  tutEl.style.setProperty('--ax', `${clamp(r.left + r.width / 2 - x, 16, w - 16) | 0}px`);
+}
+
 /* ---------------- Boot ---------------- */
 
 function applyOffline(elapsedSec) {
@@ -1415,7 +1652,7 @@ function applyOffline(elapsedSec) {
     const d = DEFS[b.type];
     if (d.produces && b.level >= 1) {
       const st = statsFor(b.type, b.level);
-      b.stored = Math.min(st.hold, b.stored + (st.rate / 60) * elapsedSec);
+      b.stored = Math.min(st.hold, b.stored + (st.rate * (1 + researchBonus('logistics')) / 60) * elapsedSec);
     }
   }
 }
@@ -1432,7 +1669,10 @@ function start(hotData) {
   $('#builders').addEventListener('click', () => { if (!B) { Sound.play('click'); openBuilders(); } });
   $('#hq-badge').addEventListener('click', () => { if (!B) openRename(); });
   $('#btn-collect').addEventListener('click', collectAll);
-  $('#btn-campaign').addEventListener('click', () => { Sound.play('click'); openCampaign(); });
+  $('#btn-campaign').addEventListener('click', () => { Sound.play('click'); tutorialEvent('campaign'); openCampaign(); });
+  $('#btn-hero').addEventListener('click', () => { if (!B) { Sound.play('click'); openHeroes(); } });
+  $('#btn-gift').addEventListener('click', () => { if (!B) { Sound.play('click'); openLogin(); } });
+  setTimeout(() => { if (!B && loginClaimable() && S.tut >= 99 && modal.hidden) openLogin(); }, 1200);
   resize();
   recenter();
   ground = buildGroundCanvas(1.5);
@@ -1442,7 +1682,7 @@ function start(hotData) {
   document.addEventListener('visibilitychange', () => { if (document.hidden) save(); });
   window.addEventListener('pagehide', save);
   window.claude?.hot?.snapshot?.(() => ({ save: serialize() }));
-  if (!saved) setTimeout(() => toast('Welcome, Commander. Tap the bubbles to collect resources', 'info'), 600);
+  if (!saved) setTimeout(() => toast('Welcome, Commander. Outpost Bravo is yours to defend', 'info'), 600);
   requestAnimationFrame(t => { lastFrame = t; frame(t); });
 }
 

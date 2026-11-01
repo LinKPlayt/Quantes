@@ -24,6 +24,7 @@ const LIMITS = {
   hq:         [0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
   goldmine:   [0, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7],
   steelworks: [0, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7],
+  lab:        [0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
   depot:      [0, 1, 1, 2, 2, 2, 3, 3, 4, 4, 5, 5, 6],
   mg:         [0, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7],
   cannon:     [0, 0, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6],
@@ -97,6 +98,13 @@ const DEFS = {
     time: { base: 20, growth: 1.7 },
     hp: { base: 600, growth: 1.25 },
     storage: { base: 1500, growth: 1.6 },
+  },
+  lab: {
+    name: 'Research Lab', code: 'RL', cat: 'economy', size: 2, max: MAX_LEVEL,
+    desc: 'Researches permanent upgrades for your whole base. Its level caps how far each research can go.',
+    cost: { base: { gold: 1500, steel: 1500 }, growth: 1.7 },
+    time: { base: 60, growth: 1.7 },
+    hp: { base: 700, growth: 1.25 },
   },
   mg: {
     name: 'Machine Gun Nest', code: 'MG', cat: 'defense', size: 2, max: MAX_LEVEL,
@@ -477,3 +485,84 @@ const CAMPAIGN = [
 
 // Stars from how much of the Command Center survived a campaign mission.
 function campaignStars(hqFraction) { return hqFraction >= 0.7 ? 3 : hqFraction >= 0.35 ? 2 : 1; }
+
+/* ---------------- Research (Research Lab) ---------------- */
+// Permanent bonuses. A topic can be researched up to the Lab's level (and its own max).
+const RESEARCH = {
+  ballistics: { name: 'Ballistics', max: 10, desc: '+6% damage for every defense', per: 0.06, cost: { gold: 1200, steel: 1600 } },
+  armor:      { name: 'Reinforced Concrete', max: 10, desc: '+8% hit points for every building', per: 0.08, cost: { gold: 1000, steel: 1800 } },
+  logistics:  { name: 'Logistics', max: 10, desc: '+8% gold and steel production', per: 0.08, cost: { gold: 1500, steel: 800 } },
+  airpower:   { name: 'Air Command', max: 6, desc: '+15% airstrike damage and 2s shorter cooldown', per: 0.15, cost: { gold: 2000, steel: 2000 } },
+  engineering:{ name: 'Engineering', max: 5, desc: '5% faster construction', per: 0.05, cost: { gold: 2500, steel: 1500 } },
+  medicine:   { name: 'Field Medicine', max: 6, desc: '+5% Field Repair healing and 3s shorter cooldown', per: 0.05, cost: { gold: 1800, steel: 1800 } },
+};
+function researchCost(id, L) {
+  const c = RESEARCH[id].cost, m = Math.pow(1.85, L - 1);
+  return { gold: Math.round(c.gold * m / 50) * 50, steel: Math.round(c.steel * m / 50) * 50 };
+}
+function researchTime(L) { return Math.min(MAX_BUILD_TIME, Math.round(45 * Math.pow(1.75, L - 1))); }
+
+/* ---------------- Defense specializations ---------------- */
+// At level 5 a defense can pick one permanent specialization.
+const SPEC_LEVEL = 5;
+const SPECS = {
+  rapid: { name: 'Rapid Fire', desc: '+35% fire rate', color: '#f2b632' },
+  heavy: { name: 'Heavy Rounds', desc: '+45% damage per hit', color: '#c8402a' },
+  scope: { name: 'Long Barrel', desc: '+25% range', color: '#6ec0ff' },
+};
+
+/* ---------------- Targeting priority ---------------- */
+const PRIORITIES = [
+  { id: 'close', name: 'Closest' },
+  { id: 'first', name: 'First' },
+  { id: 'strong', name: 'Strongest' },
+  { id: 'weak', name: 'Weakest' },
+];
+
+/* ---------------- Heroes ---------------- */
+// One hero joins every battle. Tap the map to move them; enemies stop to fight them.
+const HEROES = {
+  commando: {
+    name: 'Sgt. Vance', title: 'Commando', color: '#4f6a32', unlock: { hq: 1 },
+    hp: 420, speed: 1.9, dmg: 13, rate: 4, range: 3.4, regen: 6,
+    ability: { name: 'Frag Barrage', cd: 22, desc: 'Throws five grenades at the enemy he is fighting.', dmg: 110, radius: 1.3 },
+    bio: 'Fast, aggressive and hard to pin down. Great at holding a gate.',
+  },
+  engineer: {
+    name: 'Lt. Quill', title: 'Field Engineer', color: '#b8682a', unlock: { mission: 'm3' },
+    hp: 520, speed: 1.5, dmg: 9, rate: 3, range: 3.4, regen: 4, repair: 18,
+    ability: { name: 'Sentry Drop', cd: 28, desc: 'Deploys an auto-turret beside her for 18 seconds.', dmg: 14, life: 18 },
+    bio: 'Repairs nearby buildings while she fights. Unlocks after campaign mission 3.',
+  },
+  heavy: {
+    name: 'Cpl. Brann', title: 'Heavy Weapons', color: '#5a5f66', unlock: { hq: 6 },
+    hp: 900, speed: 1.1, dmg: 40, rate: 1.2, range: 3.8, regen: 8, armor: 6,
+    ability: { name: 'Rocket Strike', cd: 26, desc: 'Fires a heavy rocket that wrecks vehicles.', dmg: 700, radius: 1.2 },
+    bio: 'Slow tank of a soldier with a rocket launcher. Unlocks at Command Center 6.',
+  },
+};
+const HERO_MAX = 10;
+function heroXpFor(L) { return 80 * L * L; } // xp needed to go from L to L+1
+function heroScale(L) { return 1 + 0.14 * (L - 1); }
+
+/* ---------------- Daily challenge ---------------- */
+const DAILY_MODS = [
+  { id: 'fast', name: 'Blitz', desc: 'Enemies move 35% faster', mods: { fast: 1.35 } },
+  { id: 'armored', name: 'Hardened', desc: 'Enemies have 50% more health', mods: { armored: 1.5 } },
+  { id: 'noair', name: 'Grounded', desc: 'No airstrikes', mods: { noAirstrike: true } },
+  { id: 'norepair', name: 'No Medics', desc: 'No Field Repair', mods: { noRepair: true } },
+  { id: 'swarm', name: 'Swarm', desc: 'Twice as many enemies, each weaker', mods: { swarm: true } },
+  { id: 'nohero', name: 'Lone Command', desc: 'No hero in this battle', mods: { noHero: true } },
+];
+const DAILY_POOLS = [
+  { name: 'Infantry Rush', types: ['rifleman', 'grenadier', 'moto', 'sapper', 'medic', 'flamer'] },
+  { name: 'Armored Column', types: ['jeep', 'tank', 'apc', 'rifleman', 'heavy'] },
+  { name: 'Air Raid', types: ['drone', 'heli', 'rifleman', 'jeep'] },
+  { name: 'Demolition Crew', types: ['sapper', 'flamer', 'moto', 'artillery', 'rifleman'] },
+  { name: 'Combined Arms', types: ['rifleman', 'grenadier', 'tank', 'drone', 'medic', 'heavy', 'artillery'] },
+];
+
+/* ---------------- Daily login rewards (7-day cycle) ---------------- */
+const LOGIN_REWARDS = [
+  { gold: 400 }, { steel: 400 }, { medals: 3 }, { gold: 800, steel: 800 }, { medals: 5 }, { gold: 1500, steel: 1500 }, { medals: 15, gold: 2500, steel: 2500 },
+];

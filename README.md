@@ -67,11 +67,26 @@ a vignette that pulses red when the Command Center is in danger.
 **Campaign: Operation Iron Line**: 12 scripted missions fought at your base, each with fixed waves,
 special rules (faster enemies, tougher armor, no airstrikes), boss fights, rewards and 3-star ratings.
 
+## Update 6: ideas from the genre's biggest hits
+
+Researched Kingdom Rush, Bloons TD 6, Boom Beach and Clash of Clans, and added the systems that keep players coming back:
+
+- **Heroes** (Kingdom Rush): a commander unit joins every battle. Tap the map to move them; enemies stop to fight them. Three heroes (Commando, Field Engineer, Heavy Weapons), each with a special ability, levels 1-10.
+- **Targeting priority** (Bloons TD 6): set each defense to shoot the Closest, First, Strongest or Weakest enemy.
+- **Specializations** (Kingdom Rush): at level 5 a defense picks Rapid Fire, Heavy Rounds or Long Barrel.
+- **Research Lab** (Clash of Clans / Boom Beach): permanent base-wide upgrades such as damage, hit points, production, airstrikes, build speed and repairs.
+- **Daily challenge** (Bloons TD 6): a new five-wave challenge every day with two random rule changes and a medal reward.
+- **Daily supply** (Boom Beach): a 7-day login reward calendar.
+- **Next-wave preview and call early** (Kingdom Rush): see what's coming and start the next wave early for bonus gold.
+- **First-time tutorial**: guided hints for new players.
+- **Service record**: lifetime stats from the menu.
+
 ## Code layout
 
 - `js/data.js` – building stats, costs, limits per HQ level, wave previews
 - `js/render.js` – procedural terrain and building art (canvas)
 - `js/audio.js` – synthesized sound effects and vibration
+- `js/hero.js` – heroes: movement, combat, abilities, levels and the hero screen
 - `js/campaign.js` – campaign missions: operation map, briefings, results and stars
 - `js/battle.js` – battle mode: waves, enemy pathing (flow field), turret fire, rewards
 - `js/game.js` – state, saving, placement, input, HUD and main loop
