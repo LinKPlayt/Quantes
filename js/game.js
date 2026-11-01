@@ -26,6 +26,19 @@ function newBase() {
   add('depot', cx + 4, cy + 2);
   s.buildings.find(b => b.type === 'goldmine').stored = 120;
   s.buildings.find(b => b.type === 'steelworks').stored = 80;
+  return migrate(s);
+}
+
+// Fill in fields added after the first release so older saves keep working.
+function migrate(s) {
+  if (s.medals == null) s.medals = 10;
+  if (s.xp == null) s.xp = 0;
+  if (s.builders == null) s.builders = START_BUILDERS;
+  if (!s.claimed) s.claimed = {};
+  s.stats = Object.assign({ kills: 0, collectedGold: 0, airstrikes: 0, bosses: 0 }, s.stats || {});
+  s.settings = Object.assign({ sound: true, haptics: true }, s.settings || {});
+  if (s.nextDrop == null) s.nextDrop = Date.now() + FIRST_DROP_DELAY;
+  if (s.bestWave == null) s.bestWave = 0;
   return s;
 }
 
@@ -48,7 +61,7 @@ function load(raw) {
       if (b.baseAngle == null) b.baseAngle = Math.random() * Math.PI * 2;
       if (b.stored == null) b.stored = 0;
     }
-    return s;
+    return migrate(s);
   } catch (e) { return null; }
 }
 
@@ -58,7 +71,34 @@ function hqLevel() { const h = hq(); return h ? Math.max(1, h.level) : 1; }
 function countOf(type) { return S.buildings.filter(b => b.type === type).length; }
 function limitOf(type) { return LIMITS[type][hqLevel()]; }
 function busyBuilders() { return S.buildings.filter(b => b.job).length; }
-function freeBuilders() { return BUILDERS - busyBuilders(); }
+function freeBuilders() { return S.builders - busyBuilders(); }
+
+/* ----- Commander rank & medals ----- */
+function addXP(n) {
+  const before = rankIndex(S.xp);
+  S.xp += n;
+  const after = rankIndex(S.xp);
+  if (after > before) {
+    S.medals += RANK_MEDALS;
+    toast(`Promoted to ${RANKS[after].name}! +${RANK_MEDALS} medals`, 'good');
+    Sound.play('medal'); buzz([40, 40, 40]);
+  }
+}
+
+// Medals to finish a running job right away: one per started minute left.
+function finishCost(b) {
+  if (!b.job) return 0;
+  return Math.max(1, Math.ceil((b.job.end - Date.now()) / 60000));
+}
+
+function finishNow(b) {
+  if (!b.job) return;
+  const c = finishCost(b);
+  if (S.medals < c) { toast(`You need ${c} medals. Earn them in battle and from missions`, 'bad'); Sound.play('error'); return; }
+  S.medals -= c;
+  b.job.end = Date.now();
+  completeJob(b);
+}
 
 function storageCap() {
   let cap = HQ_STORAGE[hqLevel()];
@@ -140,6 +180,8 @@ function completeJob(b) {
   b.job = null;
   const c = centerOf(b);
   burst(c.x, c.y - 10, '#f2b632', 18);
+  Sound.play('done');
+  addXP(b.type === 'hq' ? b.level * 40 : b.type === 'wall' ? 0 : b.level * 10);
   toast(b.level === 1 ? `${displayName(b.type, 1)} is ready` : `${displayName(b.type, b.level)} upgraded to level ${b.level}`, 'good');
   if (b.type === 'hq') toast(hqUnlockText(b.level), 'info');
   save();
@@ -157,6 +199,7 @@ function upgrade(b) {
   if (!st.ok) { toast(st.reason, 'bad'); return; }
   pay(st.cost);
   startJob(b, st.to);
+  Sound.play('build');
   if (!b.job) {
     const c = centerOf(b);
     burst(c.x, c.y, '#f2b632', 10);
@@ -196,16 +239,32 @@ function sell(b) {
   save();
 }
 
+// Collect from every mine and foundry in one tap.
+function collectAll() {
+  let g = 0, st = 0, any = false;
+  for (const b of S.buildings) {
+    if (!hasBubble(b)) continue;
+    any = true;
+    const amt = collect(b, true);
+    if (DEFS[b.type].produces === 'gold') g += amt; else st += amt;
+  }
+  if (!any) return;
+  if (!g && !st) { toast('Storage is full. Build or upgrade a Supply Depot', 'bad'); Sound.play('error'); return; }
+  toast(`Collected ${g ? fmt(g) + ' gold' : ''}${g && st ? ' and ' : ''}${st ? fmt(st) + ' steel' : ''}`, 'good');
+}
+
 function collect(b, silent) {
   const kind = DEFS[b.type].produces;
   if (!kind || b.level < 1) return 0;
   const space = storageCap() - S[kind];
   const amt = Math.floor(Math.min(b.stored, space));
   if (amt <= 0) {
-    if (!silent && b.stored >= 1) toast(`${kind === 'gold' ? 'Gold' : 'Steel'} storage is full. Build or upgrade a Supply Depot`, 'bad');
+    if (!silent && b.stored >= 1) { toast(`${kind === 'gold' ? 'Gold' : 'Steel'} storage is full. Build or upgrade a Supply Depot`, 'bad'); Sound.play('error'); }
     return 0;
   }
   S[kind] += amt;
+  if (kind === 'gold') S.stats.collectedGold += amt;
+  Sound.play('collect'); buzz(10);
   b.stored -= amt;
   const c = centerOf(b);
   floaters.push({ x: c.x, y: c.y - 30, text: `+${fmt(amt)}`, color: kind === 'gold' ? '#f5c542' : '#c4d3e0', life: 1.2, max: 1.2 });
@@ -266,6 +325,7 @@ function confirmPlace() {
   const st = buildStatus(type);
   if (!st.ok) { toast(st.reason, 'bad'); placing = null; showPlaceCtrl(false); return; }
   pay(st.cost);
+  Sound.play('build');
   const b = { id: S.nextId++, type, x: placing.x, y: placing.y, level: 0, job: null, stored: 0, baseAngle: Math.random() * Math.PI * 2 };
   S.buildings.push(b);
   startJob(b, 1);
@@ -424,8 +484,8 @@ function hitsGhost(w) {
 }
 
 function tap(sx, sy) {
-  if (B) return;
   const w = screenToWorld(sx, sy);
+  if (B) { battleTap(w); return; }
   if (placing) {
     const n = DEFS[placing.type].size;
     const nx = Math.floor(w.x / TILE - (n - 1) / 2), ny = Math.floor(w.y / TILE - (n - 1) / 2);
@@ -433,6 +493,7 @@ function tap(sx, sy) {
     updatePlacing();
     return;
   }
+  if (S.drop && Math.hypot(w.x - (S.drop.x + 0.5) * TILE, w.y - (S.drop.y + 0.3) * TILE) < TILE * 0.9) { openDrop(); return; }
   // collection bubbles first (they float above the roof)
   for (const b of S.buildings) {
     if (!hasBubble(b)) continue;
@@ -480,8 +541,9 @@ let tSec = 0, lastFrame = performance.now(), lastSave = 0, lastPanel = 0;
 function update(dt) {
   tSec += dt;
   const now = Date.now();
+  if (!S.drop && now >= S.nextDrop && !B) spawnDrop();
   for (const b of S.buildings) {
-    if (b.job && now >= b.job.end) completeJob(b);
+    if (b.job && now >= b.job.end && !B) completeJob(b);
     const d = DEFS[b.type];
     if (d.produces && b.level >= 1) {
       const st = statsFor(b.type, b.level);
@@ -535,6 +597,7 @@ function draw() {
   if (placing) drawGhost();
 
   // collection bubbles
+  if (S.drop && !B) drawSupplyCrate(ctx, (S.drop.x + 0.5) * TILE, (S.drop.y + 0.5) * TILE, tSec);
   if (!placing && !B) for (const b of S.buildings) {
     if (!hasBubble(b)) continue;
     const p = bubblePos(b);
@@ -648,6 +711,7 @@ const ICON = {
   gold: '<svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="11" r="8" fill="#b88a1c"/><circle cx="10" cy="10" r="8" fill="#f5c542"/><circle cx="7.5" cy="7.5" r="2.2" fill="#fff1b0"/></svg>',
   steel: '<svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M2 15h16l-3-7H5z" fill="#4f5961"/><path d="M5 8h10l-2-4H7z" fill="#a9b6c1"/></svg>',
   hammer: '<svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M11 4l5 5-2 2-5-5z" fill="#c9b27a"/><path d="M8.5 7.5l3 3-7 7-3-3z" fill="#7a5c3d"/><path d="M9 3h5l3 3-2 1-3-2H9z" fill="#9aa5ad"/></svg>',
+  medal: '<svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M6 1h3l1 5-3 1zM14 1h-3l-1 5 3 1z" fill="#c8402a"/><circle cx="10" cy="12" r="6.5" fill="#b9851a"/><circle cx="10" cy="12" r="5" fill="#f2b632"/><path d="M10 8.6l1 2.1 2.3.3-1.7 1.6.4 2.3-2-1.1-2 1.1.4-2.3-1.7-1.6 2.3-.3z" fill="#fff1b0"/></svg>',
   clock: '<svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M10 5.5V10l3 2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
 };
 
@@ -685,9 +749,19 @@ function updateHUD() {
     const pct = Math.min(100, (S[k] / cap) * 100).toFixed(1);
     if (hudCache[k + 'pct'] !== pct) { hudCache[k + 'pct'] = pct; $(`#res-${k} .fill`).style.width = pct + '%'; $(`#res-${k}`).classList.toggle('full', S[k] >= cap); }
   }
-  setText($('#builders .amt'), 'bld', `${freeBuilders()}/${BUILDERS}`);
+  setText($('#builders .amt'), 'bld', `${freeBuilders()}/${S.builders}`);
+  setText($('#medals .amt'), 'med', fmt(S.medals));
   setText($('#hq-badge .rank'), 'hq', String(hqLevel()));
-  setText($('#hq-badge .sub'), 'hqs', `HQ LEVEL ${hqLevel()}`);
+  setText($('#hq-badge .base-name'), 'bn', S.name);
+  const ri = rankIndex(S.xp);
+  setText($('#hq-badge .sub'), 'hqs', `${RANKS[ri].name.toUpperCase()} · HQ ${hqLevel()}`);
+  const next = RANKS[ri + 1];
+  const xpPct = next ? ((S.xp - RANKS[ri].xp) / (next.xp - RANKS[ri].xp) * 100).toFixed(1) : '100';
+  if (hudCache.xp !== xpPct) { hudCache.xp = xpPct; $('#hq-badge .xp-fill').style.width = xpPct + '%'; }
+  const ready = claimableMissions();
+  setText($('#btn-missions .dot'), 'mdot', ready ? String(ready) : '');
+  const anyBubble = !B && !placing && S.buildings.some(hasBubble);
+  if (hudCache.ca !== anyBubble) { hudCache.ca = anyBubble; $('#btn-collect').hidden = !anyBubble; }
 }
 
 function pulseRes(kind) {
@@ -762,6 +836,8 @@ function refreshPanel(force) {
     if (t) t.textContent = fmtTime(left);
     const f = panel.querySelector('[data-live="bar"]');
     if (f) f.style.width = (p * 100).toFixed(1) + '%';
+    const fc = panel.querySelector('[data-live="fcost"]');
+    if (fc) { const c = finishCost(b); fc.textContent = c; fc.closest('.btn').classList.toggle('off', S.medals < c); }
   }
 }
 
@@ -776,6 +852,7 @@ function buildPanel(b, up) {
         <div class="job-label">${L === 0 ? 'Building' : `Upgrading to level ${b.job.to}`} ${ICON.clock}<span data-live="time"></span></div>
         <div class="job-bar"><div data-live="bar"></div></div>
       </div>
+      <button class="btn medal-btn ${S.medals >= finishCost(b) ? '' : 'off'}" data-act="finish"><span class="btn-main">Finish</span><span class="btn-sub">${ICON.medal}<span data-live="fcost">${finishCost(b)}</span></span></button>
       <button class="btn ghost" data-act="cancel">Cancel</button>`;
   } else {
     if (d.produces) {
@@ -787,6 +864,10 @@ function buildPanel(b, up) {
       const sub = up.ok ? `<span class="btn-sub">${costHTML(up.cost)}${up.time ? `<span class="cost">${ICON.clock}${fmtTime(up.time)}</span>` : ''}</span>`
         : `<span class="btn-sub reason">${up.cost && up.reason === 'Not enough resources' ? costHTML(up.cost) : up.reason}</span>`;
       actions += `<button class="btn upgrade ${up.ok ? '' : 'off'}" data-act="upgrade"><span class="btn-main">Upgrade</span>${sub}</button>`;
+    }
+    if (b.type === 'wall' && !up.max) {
+      const same = S.buildings.filter(w => w.type === 'wall' && w.level === b.level && !w.job).length;
+      if (same > 1) actions += `<button class="btn ghost" data-act="walls-all"><span class="btn-main">All ${same}</span><span class="btn-sub">to level ${b.level + 1}</span></button>`;
     }
     actions += `<button class="btn ghost" data-act="move">Move</button>`;
     if (b.type !== 'hq') {
@@ -820,6 +901,8 @@ panel.addEventListener('click', e => {
   else if (act === 'collect') collect(b);
   else if (act === 'move') startMove(b);
   else if (act === 'cancel') cancelJob(b);
+  else if (act === 'finish') finishNow(b);
+  else if (act === 'walls-all') upgradeAllWalls(b.level);
   else if (act === 'sell') { sellArmed = true; }
   else if (act === 'sell-confirm') { sell(b); return; }
   else if (act === 'close') { select(null); return; }
@@ -867,7 +950,7 @@ function renderShop() {
   tabs.innerHTML = CATEGORIES.map(c => `<button class="tab ${c.id === shopTab ? 'on' : ''}" data-tab="${c.id}">${c.label}</button>`).join('');
   const list = $('#shop-list');
   list.innerHTML = '';
-  const types = Object.keys(DEFS).filter(t => DEFS[t].cat === shopTab);
+  const types = Object.keys(DEFS).filter(t => DEFS[t].cat === shopTab).sort((a, b) => unlockLevel(a) - unlockLevel(b));
   for (const type of types) {
     const d = DEFS[type];
     const st = buildStatus(type);
@@ -985,9 +1068,12 @@ $('#btn-menu').addEventListener('click', () => {
         <li><b>Drag</b> to look around and <b>pinch</b> to zoom.</li>
         <li>Upgrade the <b>Command Center</b> to unlock more buildings and higher levels.</li>
         <li><b>Battle</b> sends endless enemy waves down the roads. Survive as long as you can; kills and cleared waves pay out, and the base is repaired afterwards.</li>
+        <li>Earn <b>medals</b> from battles, missions and promotions. Spend them to finish construction instantly or to hire more builders.</li>
         <li>Your base saves automatically on this device.</li>
       </ul>
       <div class="settings-row">
+        <button class="btn ghost toggle ${S.settings.sound ? 'on' : ''}" id="btn-sound">Sound: ${S.settings.sound ? 'On' : 'Off'}</button>
+        <button class="btn ghost toggle ${S.settings.haptics ? 'on' : ''}" id="btn-haptics">Vibration: ${S.settings.haptics ? 'On' : 'Off'}</button>
         <button class="btn ghost" id="btn-fs">Fullscreen</button>
         <button class="btn ghost" id="btn-recenter">Recenter view</button>
         <button class="btn danger-outline" id="btn-reset">Reset base</button>
@@ -995,11 +1081,21 @@ $('#btn-menu').addEventListener('click', () => {
       </div>
     </div>`);
   $('#btn-fs').addEventListener('click', toggleFullscreen);
+  $('#btn-sound').addEventListener('click', e => {
+    S.settings.sound = !S.settings.sound; applySettings(); save();
+    e.currentTarget.textContent = `Sound: ${S.settings.sound ? 'On' : 'Off'}`; e.currentTarget.classList.toggle('on', S.settings.sound);
+    Sound.play('click');
+  });
+  $('#btn-haptics').addEventListener('click', e => {
+    S.settings.haptics = !S.settings.haptics; applySettings(); save();
+    e.currentTarget.textContent = `Vibration: ${S.settings.haptics ? 'On' : 'Off'}`; e.currentTarget.classList.toggle('on', S.settings.haptics);
+    buzz(30);
+  });
   $('#btn-recenter').addEventListener('click', () => { recenter(); closeModal(); });
   const reset = $('#btn-reset');
   reset.addEventListener('click', () => {
     if (reset.dataset.armed) {
-      S = newBase(); rebuildGrid(); select(null); save(); recenter(); closeModal();
+      S = newBase(); applySettings(); rebuildGrid(); select(null); save(); recenter(); closeModal();
       toast('New base established', 'good');
     } else {
       reset.dataset.armed = '1';
@@ -1007,6 +1103,153 @@ $('#btn-menu').addEventListener('click', () => {
     }
   });
 });
+
+function applySettings() {
+  Sound.enabled = S.settings.sound;
+  hapticsOn = S.settings.haptics;
+}
+
+/* ----- Walls: upgrade a whole set ----- */
+function upgradeAllWalls(level) {
+  const list = S.buildings.filter(w => w.type === 'wall' && w.level === level && !w.job);
+  const to = level + 1;
+  if (to > levelCap('wall', hqLevel())) { toast(`Walls above level ${level} need HQ ${level}`, 'bad'); Sound.play('error'); return; }
+  const cost = costFor('wall', to);
+  let n = 0;
+  for (const w of list) { if (!canAfford(cost)) break; pay(cost); w.level = to; n++; }
+  if (!n) { toast('Not enough resources', 'bad'); Sound.play('error'); return; }
+  Sound.play('done');
+  toast(`${n} wall${n > 1 ? 's' : ''} upgraded to ${WALL_NAMES[to]}${n < list.length ? ` (${list.length - n} left: not enough resources)` : ''}`, 'good');
+  save();
+}
+
+/* ----- Supply drops ----- */
+function spawnDrop() {
+  const rnd = () => BORDER + 1 + Math.floor(Math.random() * (MAP_W - BORDER * 2 - 2));
+  for (let i = 0; i < 60; i++) {
+    const x = rnd(), y = BORDER + 1 + Math.floor(Math.random() * (MAP_H - BORDER * 2 - 2));
+    if (!grid[y * MAP_W + x]) { S.drop = { x, y }; toast('A supply crate has landed in your base', 'info'); Sound.play('alarm'); save(); return; }
+  }
+  S.nextDrop = Date.now() + 10 * 60 * 1000;
+}
+
+function openDrop() {
+  if (!S.drop) return;
+  const cap = storageCap();
+  const gold = Math.round(cap * 0.12 / 10) * 10 + 100, steel = Math.round(cap * 0.1 / 10) * 10 + 80, medals = 2;
+  const g = Math.min(gold, Math.max(0, cap - S.gold)), st = Math.min(steel, Math.max(0, cap - S.steel));
+  S.gold += g; S.steel += st; S.medals += medals;
+  const x = (S.drop.x + 0.5) * TILE, y = (S.drop.y + 0.5) * TILE;
+  burst(x, y, '#f2b632', 20);
+  floaters.push({ x, y: y - 30, text: `+${medals} medals`, color: '#f2b632', life: 1.4, max: 1.4 });
+  S.drop = null;
+  S.nextDrop = Date.now() + DROP_INTERVAL;
+  Sound.play('medal'); buzz(30);
+  toast(`Supply crate: +${fmt(g)} gold, +${fmt(st)} steel, +${medals} medals. Next drop in about 2 hours`, 'good');
+  pulseRes('gold'); pulseRes('steel');
+  save();
+}
+
+/* ----- Missions ----- */
+function missionState(m) {
+  const [cur, target] = m.progress(S);
+  return { cur: Math.min(cur, target), target, done: cur >= target, claimed: !!S.claimed[m.id] };
+}
+function claimableMissions() {
+  let n = 0;
+  for (const m of MISSIONS) { const st = missionState(m); if (st.done && !st.claimed) n++; }
+  return n;
+}
+function rewardText(r) {
+  const parts = [];
+  if (r.gold) parts.push(`${ICON.gold}${fmt(r.gold)}`);
+  if (r.steel) parts.push(`${ICON.steel}${fmt(r.steel)}`);
+  if (r.medals) parts.push(`${ICON.medal}${r.medals}`);
+  return parts.map(p => `<span class="cost">${p}</span>`).join('');
+}
+function openMissions() {
+  // show unclaimed first (claimable on top), then a few upcoming, then completed
+  const rows = MISSIONS.map(m => ({ m, st: missionState(m) }))
+    .filter(r => !r.st.claimed)
+    .sort((a, b) => (b.st.done - a.st.done));
+  const doneCount = MISSIONS.filter(m => S.claimed[m.id]).length;
+  const list = rows.slice(0, 6).map(({ m, st }) => `
+    <li class="mission ${st.done ? 'ready' : ''}">
+      <div class="m-body">
+        <div class="m-text">${m.text}</div>
+        <div class="m-bar"><div style="width:${(st.cur / st.target * 100).toFixed(1)}%"></div></div>
+        <div class="m-prog">${fmt(st.cur)} / ${fmt(st.target)}</div>
+      </div>
+      <div class="m-reward">${rewardText(m.reward)}</div>
+      ${st.done ? `<button class="btn" data-claim="${m.id}">Claim</button>` : ''}
+    </li>`).join('');
+  openModal(`
+    <div class="settings">
+      <div class="m-head"><h2>Missions</h2><span class="m-count">${doneCount} / ${MISSIONS.length} complete</span></div>
+      <ul class="missions">${list || '<li class="mission"><div class="m-text">Every mission is complete. Outstanding work, Commander.</div></li>'}</ul>
+      <div class="settings-row"><button class="btn" data-close>Done</button></div>
+    </div>`);
+  $('#modal-body').querySelectorAll('[data-claim]').forEach(btn => btn.addEventListener('click', () => claimMission(btn.dataset.claim)));
+}
+function claimMission(id) {
+  const m = MISSIONS.find(x => x.id === id);
+  if (!m || S.claimed[id] || !missionState(m).done) return;
+  S.claimed[id] = true;
+  const cap = storageCap();
+  if (m.reward.gold) S.gold = Math.min(cap, S.gold + m.reward.gold);
+  if (m.reward.steel) S.steel = Math.min(cap, S.steel + m.reward.steel);
+  if (m.reward.medals) S.medals += m.reward.medals;
+  addXP(25);
+  Sound.play('medal'); buzz(20);
+  toast(`Mission complete: ${m.text}`, 'good');
+  save();
+  openMissions();
+}
+
+/* ----- Builders ----- */
+function openBuilders() {
+  const next = S.builders + 1;
+  const canHire = S.builders < MAX_BUILDERS;
+  const cost = canHire ? BUILDER_COST[next] : 0;
+  openModal(`
+    <div class="settings">
+      <h2>Builders</h2>
+      <p class="lead">You have ${S.builders} builder${S.builders > 1 ? 's' : ''}. Each one can work on one construction job at a time. ${busyBuilders()} ${busyBuilders() === 1 ? 'is' : 'are'} busy right now.</p>
+      ${canHire ? `<p class="lead">Hire builder #${next} for ${cost} medals. You have ${S.medals}.</p>` : '<p class="lead">Your construction crew is at full strength.</p>'}
+      <div class="settings-row">
+        ${canHire ? `<button class="btn medal-btn ${S.medals >= cost ? '' : 'off'}" id="btn-hire"><span class="btn-main">Hire</span><span class="btn-sub">${ICON.medal}${cost}</span></button>` : ''}
+        <button class="btn ghost" data-close>Close</button>
+      </div>
+    </div>`);
+  const hire = $('#btn-hire');
+  if (hire) hire.addEventListener('click', () => {
+    if (S.medals < cost) { toast(`You need ${cost} medals`, 'bad'); Sound.play('error'); return; }
+    S.medals -= cost; S.builders++;
+    Sound.play('done'); toast(`Builder #${S.builders} hired`, 'good'); save(); closeModal();
+  });
+}
+
+/* ----- Rename base ----- */
+function openRename() {
+  openModal(`
+    <form class="settings" id="rename-form">
+      <h2>Rename your base</h2>
+      <label class="field-label" for="base-name-input">Base name</label>
+      <input id="base-name-input" class="text-input" maxlength="20" autocomplete="off" value="${S.name.replace(/"/g, '&quot;')}">
+      <div class="settings-row">
+        <button class="btn" type="submit">Save name</button>
+        <button class="btn ghost" type="button" data-close>Cancel</button>
+      </div>
+    </form>`);
+  const input = $('#base-name-input');
+  setTimeout(() => { try { input.focus(); input.select(); } catch (e) { /* ignore */ } }, 50);
+  $('#rename-form').addEventListener('submit', e => {
+    e.preventDefault();
+    const v = input.value.replace(/[<>]/g, '').trim().slice(0, 20);
+    if (!v) { toast('Enter a name for your base', 'bad'); return; }
+    S.name = v; save(); closeModal(); toast(`Base renamed to ${v}`, 'good');
+  });
+}
 
 async function toggleFullscreen() {
   try {
@@ -1048,7 +1291,12 @@ function start(hotData) {
   S = saved || newBase();
   if (saved) applyOffline((Date.now() - (S.saved || Date.now())) / 1000);
   rebuildGrid();
+  applySettings();
   initBattleUI();
+  $('#btn-missions').addEventListener('click', () => { if (!B) { Sound.play('click'); openMissions(); } });
+  $('#builders').addEventListener('click', () => { if (!B) { Sound.play('click'); openBuilders(); } });
+  $('#hq-badge').addEventListener('click', () => { if (!B) openRename(); });
+  $('#btn-collect').addEventListener('click', collectAll);
   resize();
   recenter();
   ground = buildGroundCanvas(1.5);

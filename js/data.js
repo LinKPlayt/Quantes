@@ -5,7 +5,9 @@ const TILE = 40;            // world pixels per grid tile
 const MAP_W = 36;           // total map width in tiles
 const MAP_H = 26;           // total map height in tiles
 const BORDER = 4;           // non-buildable wilderness around the compound
-const BUILDERS = 2;         // simultaneous construction jobs
+const START_BUILDERS = 2;   // simultaneous construction jobs at the start
+const MAX_BUILDERS = 4;
+const BUILDER_COST = [0, 0, 0, 25, 60]; // medals to hire builder #3 and #4
 const MAX_HQ = 5;
 
 // Storage that the Command Center provides on its own, per HQ level.
@@ -22,6 +24,7 @@ const LIMITS = {
   mortar:     [0, 0, 1, 1, 2, 3],
   sniper:     [0, 0, 0, 1, 2, 2],
   missile:    [0, 0, 0, 0, 1, 2],
+  flame:      [0, 0, 1, 2, 2, 3],
   wall:       [0, 25, 50, 75, 100, 125],
 };
 
@@ -118,6 +121,14 @@ const DEFS = {
     hp: { base: 700, growth: 1.3 },
     dmg: { base: 70, growth: 1.35 }, fireRate: 0.9, range: 7.5, splash: 0.8, targets: 'both',
   },
+  flame: {
+    name: 'Flame Bunker', code: 'FB', cat: 'defense', size: 2, max: 5,
+    desc: 'Short-range flamethrower. Burns groups of infantry at once.',
+    cost: { base: { gold: 600, steel: 400 }, growth: 2.2 },
+    time: { base: 25, growth: 2.2 },
+    hp: { base: 750, growth: 1.3 },
+    dmg: { base: 9, growth: 1.35 }, fireRate: 5, range: 3, splash: 1.0, targets: 'ground',
+  },
   wall: {
     name: 'Wall', code: 'WL', cat: 'walls', size: 1, max: 5,
     desc: 'Blocks the enemy path. Place several in a row; they link together.',
@@ -189,6 +200,8 @@ const ENEMIES = {
   jeep:      { name: 'Armored Jeep', hp: 260, speed: 1.7,  dmg: 8,  rate: 2.5,  range: 3.0, bounty: 15, r: 11, vehicle: true },
   tank:      { name: 'Light Tank',   hp: 850, speed: 0.55, dmg: 60, rate: 0.35, range: 4.0, splash: 0.7, bounty: 40, r: 14, vehicle: true },
   drone:     { name: 'Attack Drone', hp: 110, speed: 1.5,  dmg: 12, rate: 1.0,  range: 1.4, bounty: 12, r: 9, air: true },
+  medic:     { name: 'Field Medic',  hp: 70,  speed: 1.0,  dmg: 2,  rate: 1.0,  range: 1.8, bounty: 8,  r: 6, heal: 14, healRange: 2.2 },
+  siege:     { name: 'Siege Tank',   hp: 2600, speed: 0.38, dmg: 130, rate: 0.3, range: 4.5, splash: 1.0, bounty: 220, r: 20, vehicle: true, boss: true },
 };
 
 function enemyHp(type, wave) {
@@ -202,8 +215,12 @@ function waveComposition(n) {
   if (n >= 3) list.push({ type: 'jeep', count: Math.floor(n / 2) });
   if (n >= 5) list.push({ type: 'tank', count: Math.floor((n - 3) / 2) });
   if (n >= 7) list.push({ type: 'drone', count: Math.floor((n - 5) / 2) });
+  if (n >= 4) list.push({ type: 'medic', count: Math.floor((n - 2) / 2) });
+  if (isBossWave(n)) list.push({ type: 'siege', count: 1 + Math.floor(n / 15) });
   return list;
 }
+
+function isBossWave(n) { return n % 5 === 0; }
 
 // Which roads the enemy uses at a given wave.
 function waveGates(n) {
@@ -216,3 +233,51 @@ function waveGates(n) {
 function waveReward(n) {
   return { gold: 60 + n * 45, steel: 40 + n * 30 };
 }
+
+// Medals for clearing a wave: boss waves pay extra.
+function waveMedals(n) { return 1 + (isBossWave(n) ? 3 : 0); }
+
+/* ---------------- Battle abilities ---------------- */
+const ABILITIES = {
+  airstrike: { name: 'Airstrike', cooldown: 35 },
+  repair:    { name: 'Field Repair', cooldown: 50, heal: 0.3 },
+};
+function airstrikeDamage(wave) { return 140 + wave * 25; }
+
+/* ---------------- Commander ranks ---------------- */
+const RANKS = [
+  { name: 'Private', xp: 0 }, { name: 'Corporal', xp: 100 }, { name: 'Sergeant', xp: 300 },
+  { name: 'Lieutenant', xp: 700 }, { name: 'Captain', xp: 1400 }, { name: 'Major', xp: 2600 },
+  { name: 'Colonel', xp: 4500 }, { name: 'General', xp: 7500 },
+];
+const RANK_MEDALS = 5;
+function rankIndex(xp) {
+  let i = 0;
+  while (i + 1 < RANKS.length && xp >= RANKS[i + 1].xp) i++;
+  return i;
+}
+
+/* ---------------- Missions ---------------- */
+// progress(s) returns [current, target]. Rewards go straight to storage.
+const builtAt = (s, type, L) => s.buildings.filter(b => b.type === type && b.level >= L).length;
+const MISSIONS = [
+  { id: 'cannon',   text: 'Build a Cannon',                         progress: s => [builtAt(s, 'cannon', 1), 1], reward: { gold: 250 } },
+  { id: 'walls10',  text: 'Build 10 wall segments',                 progress: s => [builtAt(s, 'wall', 1), 10], reward: { steel: 200 } },
+  { id: 'collect',  text: 'Collect 1,000 gold from mines',          progress: s => [s.stats.collectedGold, 1000], reward: { steel: 300 } },
+  { id: 'hq2',      text: 'Upgrade the Command Center to level 2',  progress: s => [builtAt(s, 'hq', 2), 1], reward: { medals: 5 } },
+  { id: 'wave3',    text: 'Survive wave 3',                         progress: s => [s.bestWave, 3], reward: { gold: 400, medals: 3 } },
+  { id: 'flame',    text: 'Build a Flame Bunker',                   progress: s => [builtAt(s, 'flame', 1), 1], reward: { gold: 500 } },
+  { id: 'kills100', text: 'Destroy 100 enemies',                    progress: s => [s.stats.kills, 100], reward: { gold: 600, steel: 300 } },
+  { id: 'strike',   text: 'Call in an airstrike',                   progress: s => [s.stats.airstrikes, 1], reward: { medals: 3 } },
+  { id: 'wave5',    text: 'Survive the first boss wave (wave 5)',   progress: s => [s.bestWave, 5], reward: { medals: 10 } },
+  { id: 'def3',     text: 'Upgrade any defense to level 3',         progress: s => [s.buildings.filter(b => DEFS[b.type].cat === 'defense' && b.level >= 3).length, 1], reward: { steel: 800 } },
+  { id: 'hq3',      text: 'Upgrade the Command Center to level 3',  progress: s => [builtAt(s, 'hq', 3), 1], reward: { medals: 10 } },
+  { id: 'boss',     text: 'Destroy a Siege Tank',                   progress: s => [s.stats.bosses, 1], reward: { gold: 1500, medals: 5 } },
+  { id: 'kills500', text: 'Destroy 500 enemies',                    progress: s => [s.stats.kills, 500], reward: { medals: 15 } },
+  { id: 'wave10',   text: 'Survive wave 10',                        progress: s => [s.bestWave, 10], reward: { medals: 20 } },
+  { id: 'hq5',      text: 'Max out the Command Center',             progress: s => [builtAt(s, 'hq', 5), 1], reward: { medals: 30 } },
+];
+
+// Supply drops: a crate lands in the base on a timer.
+const DROP_INTERVAL = 2 * 60 * 60 * 1000;
+const FIRST_DROP_DELAY = 90 * 1000;

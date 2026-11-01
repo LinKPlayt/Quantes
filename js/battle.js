@@ -26,12 +26,14 @@ function startBattle() {
   B = {
     wave: 0, phase: 'break', breakT: 2.5, queue: [], spawnT: 0, spawnIdx: 0,
     units: [], shots: [], fx: [], kills: 0, waves: 0,
-    loot: { gold: 0, steel: 0 }, speed: 1, flow: null, flowDirty: true, over: false,
+    loot: { gold: 0, steel: 0 }, medals: 0, speed: 1, flow: null, flowDirty: true, over: false,
+    ab: { airstrike: 3, repair: 0 }, targeting: false, planes: [], dmgBy: {}, bosses: 0,
   };
   S.battles = (S.battles || 0) + 1;
   document.body.classList.add('in-battle');
   setSpeedLabel();
   banner('Defend the base', 'First wave approaching from the west road');
+  Sound.play('alarm');
 }
 
 function startWave(n) {
@@ -48,7 +50,13 @@ function startWave(n) {
   B.spawnIdx = 0;
   B.waveSize = B.queue.length;
   const fresh = n > 1 && waveGates(n).length > waveGates(n - 1).length;
-  banner(`Wave ${n}`, fresh ? 'New attack route opened' : `${B.waveSize} hostiles inbound`);
+  if (isBossWave(n)) {
+    banner(`Boss wave ${n}`, 'Siege Tank inbound. Focus your heaviest guns');
+    Sound.play('boss'); buzz([80, 60, 80]);
+  } else {
+    banner(`Wave ${n}`, fresh ? 'New attack route opened' : `${B.waveSize} hostiles inbound`);
+    Sound.play('alarm');
+  }
 }
 
 function endBattle(reason) {
@@ -58,6 +66,11 @@ function endBattle(reason) {
   const record = survived > (S.bestWave || 0);
   if (record) S.bestWave = survived;
   save();
+  Sound.play(reason === 'retreat' ? 'win' : 'lose');
+  const names = { hq: 'Command Center gun', airstrike: 'Airstrikes' };
+  const top = Object.entries(B.dmgBy).sort((a, b) => b[1] - a[1]).slice(0, 4);
+  const total = top.reduce((a, [, v]) => a + v, 0) || 1;
+  const report = top.length ? top.map(([k, v]) => `<li><span>${names[k] || DEFS[k].name}</span><b>${fmt(v)} <small>${Math.round(v / total * 100)}%</small></b></li>`).join('') : '<li><span>No damage dealt</span><b>0</b></li>';
   const title = reason === 'retreat' ? 'Forces withdrawn' : 'Base overrun';
   const line = reason === 'retreat'
     ? 'You pulled back before the next assault. Everything you earned is in storage.'
@@ -83,9 +96,12 @@ function endBattle(reason) {
           <ul class="units">
             <li><span>Gold</span><b>+${fmt(B.loot.gold)}</b></li>
             <li><span>Steel</span><b>+${fmt(B.loot.steel)}</b></li>
+            <li><span>Medals</span><b>+${B.medals}</b></li>
           </ul>
         </div>
       </div>
+      <h3 class="report-h">Damage by defense</h3>
+      <ul class="units report">${report}</ul>
       <div class="brief-foot">
         <span class="soon">Spend your loot on upgrades, then try to beat wave ${S.bestWave + 1}.</span>
         <button class="btn" data-close>Return to base</button>
@@ -96,7 +112,7 @@ function endBattle(reason) {
 // Called when the after-action report closes: repair the base and go back to building.
 function leaveBattle() {
   if (!B) return;
-  for (const b of S.buildings) { delete b._hp; delete b._maxhp; delete b._dead; delete b._cd; delete b._tgt; b._flash = 0; }
+  for (const b of S.buildings) { delete b._hp; delete b._maxhp; delete b._dead; delete b._cd; delete b._tgt; delete b._heal; b._flash = 0; }
   B = null;
   document.body.classList.remove('in-battle');
   $('#banner').hidden = true;
@@ -186,6 +202,10 @@ function battleUpdate(dt) {
     if (!B.queue.length && !B.units.length) waveCleared();
   }
 
+  for (const k in B.ab) B.ab[k] = Math.max(0, B.ab[k] - dt);
+  for (const pl of B.planes) updatePlane(pl, dt);
+  B.planes = B.planes.filter(pl => !pl.done);
+
   for (const u of B.units) updateEnemy(u, dt);
   B.units = B.units.filter(u => u.hp > 0);
 
@@ -198,6 +218,10 @@ function battleUpdate(dt) {
 
   // smoke from damaged buildings
   for (const b of S.buildings) {
+    if (b._heal > 0) {
+      b._heal -= dt;
+      if (Math.random() < dt * 10) { const c = centerOf(b); particles.push({ x: c.x + (Math.random() - 0.5) * 30, y: c.y, vx: 0, vy: -40, g: 0, life: 0.8, max: 0.8, r: 3, color: '#8fe07a' }); }
+    }
     if (b._dead || b._hp > b._maxhp * 0.5) continue;
     if (Math.random() < dt * 3) {
       const c = centerOf(b);
@@ -227,7 +251,11 @@ function waveCleared() {
   if (n > (S.bestWave || 0)) S.bestWave = n;
   B.phase = 'break';
   B.breakT = 6;
-  banner(`Wave ${n} cleared`, `+${fmt(got.gold)} gold  +${fmt(got.steel)} steel`);
+  const m = waveMedals(n);
+  S.medals += m; B.medals += m;
+  addXP(10 * n);
+  banner(`Wave ${n} cleared`, `+${fmt(got.gold)} gold  +${fmt(got.steel)} steel  +${m} medal${m > 1 ? 's' : ''}`);
+  Sound.play('medal');
   save();
 }
 
@@ -322,12 +350,28 @@ function updateEnemy(u, dt) {
         B.shots.push({ kind: 'enemy-shell', x: u.x, y: u.y, sx: u.x, sy: u.y, tx: hx, ty: hy, t: 0, dur: u.type === 'tank' ? 0.35 : 0.6, arc: u.type === 'grenadier' ? 26 : 0, dmg: e.dmg, bTarget: u.tgt });
       } else {
         damageBuilding(u.tgt, e.dmg);
+        Sound.play('rifle');
         B.fx.push({ kind: 'tracer', x1: u.x, y1: u.y - (u.air ? 18 : 2), x2: hx, y2: hy, life: 0.07, color: '#ff9a6a' });
       }
       u.flash = 0.06;
     }
   }
   if (u.flash > 0) u.flash -= dt;
+
+  // field medics patch up nearby attackers
+  if (e.heal) {
+    u.healT = (u.healT || 0) - dt;
+    if (u.healT <= 0) {
+      u.healT = 1;
+      let healed = false;
+      for (const o of B.units) {
+        if (o === u || o.hp <= 0 || o.hp >= o.max || o.air) continue;
+        if (Math.hypot(o.x - u.x, o.y - u.y) <= e.healRange * TILE) { o.hp = Math.min(o.max, o.hp + e.heal); o.healFx = 0.4; healed = true; }
+      }
+      if (healed) B.fx.push({ kind: 'ring', x: u.x, y: u.y, r: e.healRange * TILE, life: 0.4, max: 0.4, color: '120,220,120' });
+    }
+  }
+  if (u.healFx > 0) u.healFx -= dt;
 }
 
 function damageBuilding(b, dmg) {
@@ -338,18 +382,28 @@ function damageBuilding(b, dmg) {
     b._dead = true;
     const c = centerOf(b);
     explosion(c.x, c.y, DEFS[b.type].size * 18);
+    Sound.play(b.type === 'wall' ? 'boom' : 'bigboom');
+    if (b.type !== 'wall') buzz(60);
     B.flowDirty = true;
-    if (b.type === 'hq') { banner('Command Center destroyed', ''); setTimeout(() => endBattle('defeat'), 1400); B.phase = 'lost'; }
+    if (b.type === 'hq') { buzz([200, 80, 300]); banner('Command Center destroyed', ''); setTimeout(() => endBattle('defeat'), 1400); B.phase = 'lost'; }
   }
 }
 
-function damageEnemy(u, dmg) {
+function damageEnemy(u, dmg, src) {
   if (u.hp <= 0) return;
+  if (src) B.dmgBy[src] = (B.dmgBy[src] || 0) + Math.min(dmg, u.hp);
   u.hp -= dmg;
   u.hit = 0.1;
   if (u.hp <= 0) {
     B.kills++;
+    S.stats.kills++;
     const e = ENEMIES[u.type];
+    addXP(e.boss ? 40 : 1);
+    if (e.boss) {
+      S.stats.bosses++; B.bosses++;
+      explosion(u.x, u.y, 60); Sound.play('bigboom'); buzz([100, 50, 150]);
+      banner('Siege Tank destroyed', `+${e.bounty} gold`);
+    } else if (e.vehicle || e.air) Sound.play('boom');
     addLoot('gold', e.bounty);
     if (e.vehicle || e.air) addLoot('steel', Math.round(e.bounty * 0.6));
     if (e.vehicle || e.air) explosion(u.x, u.y, e.r * 1.6);
@@ -358,6 +412,7 @@ function damageEnemy(u, dmg) {
 }
 
 function explosion(x, y, size) {
+  if (size > 20) Sound.play('boom');
   B.fx.push({ kind: 'boom', x, y, r: size, life: 0.45, max: 0.45 });
   for (let i = 0; i < 10; i++) {
     const a = Math.random() * Math.PI * 2, s = 30 + Math.random() * 90;
@@ -412,24 +467,40 @@ function updateDefense(b, dt) {
   switch (b.type) {
     case 'mg':
     case 'hq':
-      damageEnemy(t, w.dmg);
+      Sound.play('mg');
+      damageEnemy(t, w.dmg, b.type);
       B.fx.push({ kind: 'tracer', x1: b.type === 'hq' ? c.x : mx, y1: b.type === 'hq' ? c.y - 40 : my, x2: t.x, y2: t.y - (t.air ? 18 : 2), life: 0.06, color: '#ffe08a' });
       break;
     case 'sniper':
-      damageEnemy(t, w.dmg);
+      Sound.play('sniper');
+      damageEnemy(t, w.dmg, 'sniper');
       B.fx.push({ kind: 'tracer', x1: c.x, y1: c.y - 60, x2: t.x, y2: t.y - (t.air ? 18 : 2), life: 0.18, color: '#e8f7ff', width: 2 });
       break;
     case 'cannon':
-      B.shots.push({ kind: 'shell', x: mx, y: my, tx: t.x, ty: t.y, target: t, speed: 14 * TILE, dmg: w.dmg, splash: 0 });
+      Sound.play('cannon');
+      B.shots.push({ kind: 'shell', x: mx, y: my, tx: t.x, ty: t.y, target: t, speed: 14 * TILE, dmg: w.dmg, splash: 0, src: 'cannon' });
       break;
     case 'mortar':
-      B.shots.push({ kind: 'mortar', x: c.x, y: c.y, sx: c.x, sy: c.y, tx: t.x, ty: t.y, t: 0, dur: 1.3, arc: 120, dmg: w.dmg, splash: w.splash, air: false });
+      Sound.play('mortar');
+      B.shots.push({ kind: 'mortar', x: c.x, y: c.y, sx: c.x, sy: c.y, tx: t.x, ty: t.y, t: 0, dur: 1.3, arc: 120, dmg: w.dmg, splash: w.splash, air: false, src: 'mortar' });
       break;
     case 'missile':
+      Sound.play('rocket');
       for (const off of [-0.35, 0.35]) {
-        B.shots.push({ kind: 'rocket', x: mx, y: my, tx: t.x, ty: t.y, target: t, speed: 8 * TILE, dmg: w.dmg, splash: w.splash, air: true, wobble: off, age: 0 });
+        B.shots.push({ kind: 'rocket', x: mx, y: my, tx: t.x, ty: t.y, target: t, speed: 8 * TILE, dmg: w.dmg, splash: w.splash, air: true, wobble: off, age: 0, src: 'missile' });
       }
       break;
+    case 'flame': {
+      Sound.play('flame');
+      // a cone of fire: everything near the target takes damage
+      const nx = c.x + Math.cos(want) * 24, ny = c.y - 2 + Math.sin(want) * 24;
+      splashDamage(t.x, t.y, w.splash, w.dmg, false, 'flame');
+      for (let i = 0; i < 6; i++) {
+        const k = Math.random();
+        particles.push({ x: nx, y: ny, vx: (t.x - nx) * (2.2 + k) + (Math.random() - 0.5) * 40, vy: (t.y - ny) * (2.2 + k) + (Math.random() - 0.5) * 40, g: -20, life: 0.35, max: 0.35, r: 4 + Math.random() * 3, grow: 14, color: Math.random() < 0.5 ? '#ffb347' : '#ff6a2a' });
+      }
+      break;
+    }
   }
 }
 
@@ -447,7 +518,8 @@ function updateShot(p, dt) {
         damageBuilding(p.bTarget, p.dmg);
         B.fx.push({ kind: 'boom', x: p.tx, y: p.ty, r: 14, life: 0.3, max: 0.3 });
       } else {
-        splashDamage(p.tx, p.ty, p.splash, p.dmg, p.air);
+        if (p.kind === 'bomb') { Sound.play('bigboom'); buzz(40); }
+        splashDamage(p.tx, p.ty, p.splash, p.dmg, p.air, p.src);
         explosion(p.tx, p.ty, p.splash * TILE * 0.9);
       }
     }
@@ -460,8 +532,8 @@ function updateShot(p, dt) {
   const step = p.speed * dt;
   if (d <= step + 2) {
     p.done = true;
-    if (p.splash) { splashDamage(p.tx, p.ty, p.splash, p.dmg, p.air); explosion(p.tx, p.ty, 16); }
-    else if (p.target && p.target.hp > 0) { damageEnemy(p.target, p.dmg); B.fx.push({ kind: 'boom', x: p.tx, y: p.ty, r: 10, life: 0.25, max: 0.25 }); }
+    if (p.splash) { splashDamage(p.tx, p.ty, p.splash, p.dmg, p.air, p.src); explosion(p.tx, p.ty, 16); }
+    else if (p.target && p.target.hp > 0) { damageEnemy(p.target, p.dmg, p.src); B.fx.push({ kind: 'boom', x: p.tx, y: p.ty, r: 10, life: 0.25, max: 0.25 }); }
     return;
   }
   let a = Math.atan2(dy, dx);
@@ -471,13 +543,73 @@ function updateShot(p, dt) {
   if (p.kind === 'rocket' && Math.random() < 0.7) particles.push({ x: p.x, y: p.y, vx: 0, vy: -4, g: 0, life: 0.5, max: 0.5, r: 2.5, grow: 4, color: 'smoke' });
 }
 
-function splashDamage(x, y, radiusTiles, dmg, hitsAir) {
+function splashDamage(x, y, radiusTiles, dmg, hitsAir, src) {
   const r = radiusTiles * TILE;
   for (const u of B.units) {
     if (u.hp <= 0 || (u.air && !hitsAir)) continue;
     const d = Math.hypot(u.x - x, u.y - y);
-    if (d <= r) damageEnemy(u, dmg * (d < r * 0.4 ? 1 : 0.6));
+    if (d <= r) damageEnemy(u, dmg * (d < r * 0.4 ? 1 : 0.6), src);
   }
+}
+
+/* ---------------- Abilities ---------------- */
+
+function abilityReady(k) { return B && !B.over && B.phase !== 'lost' && B.ab[k] <= 0; }
+
+function armAirstrike() {
+  if (!B) return;
+  if (!abilityReady('airstrike')) { Sound.play('error'); return; }
+  B.targeting = !B.targeting;
+  document.body.classList.toggle('targeting', B.targeting);
+  Sound.play('click');
+  if (B.targeting) banner('Airstrike ready', 'Tap the map to mark the target');
+}
+
+// Taps on the map during battle: only used to aim the airstrike.
+function battleTap(w) {
+  if (!B || !B.targeting) return;
+  B.targeting = false;
+  document.body.classList.remove('targeting');
+  $('#banner').hidden = true;
+  B.ab.airstrike = ABILITIES.airstrike.cooldown;
+  S.stats.airstrikes++;
+  const a = -0.22;
+  B.planes.push({ tx: w.x, ty: w.y, a, t: 0, speed: 720, x: -9999, y: -9999, drops: [-90, -45, 0, 45, 90].map(o => ({ o, dropped: false })) });
+  B.fx.push({ kind: 'ring', x: w.x, y: w.y, r: 1.8 * TILE, life: 1.6, max: 1.6, color: '242,182,50' });
+  Sound.play('plane');
+}
+
+function updatePlane(pl, dt) {
+  pl.t += dt;
+  const along = pl.t * pl.speed - 1000;
+  const px = pl.x, py = pl.y;
+  pl.x = pl.tx + Math.cos(pl.a) * along;
+  pl.y = pl.ty + Math.sin(pl.a) * along;
+  for (const d of pl.drops) {
+    if (d.dropped || along < d.o - 70) continue;
+    d.dropped = true;
+    B.shots.push({
+      kind: 'bomb', sx: pl.x, sy: pl.y, x: pl.x, y: pl.y,
+      tx: pl.tx + Math.cos(pl.a) * d.o, ty: pl.ty + Math.sin(pl.a) * d.o,
+      t: 0, dur: 0.45, arc: 0, dmg: airstrikeDamage(B.wave), splash: 1.4, air: true, src: 'airstrike',
+    });
+  }
+  if (along > 1100) pl.done = true;
+  void px; void py;
+}
+
+function useRepair() {
+  if (!B) return;
+  if (!abilityReady('repair')) { Sound.play('error'); return; }
+  B.ab.repair = ABILITIES.repair.cooldown;
+  let n = 0;
+  for (const b of S.buildings) {
+    if (b._dead || b._hp >= b._maxhp) continue;
+    b._hp = Math.min(b._maxhp, b._hp + b._maxhp * ABILITIES.repair.heal);
+    b._heal = 1.2; n++;
+  }
+  Sound.play('heal');
+  toast(n ? `Field repair: ${n} building${n > 1 ? 's' : ''} patched up` : 'Field repair used. Nothing was damaged', 'good');
 }
 
 /* ---------------- Drawing ---------------- */
@@ -496,6 +628,12 @@ function drawBattleAir(ctx) {
       ctx.strokeStyle = f.color; ctx.lineWidth = f.width || 1.5; ctx.globalAlpha = 0.9;
       ctx.beginPath(); ctx.moveTo(f.x1, f.y1); ctx.lineTo(f.x2, f.y2); ctx.stroke();
       ctx.globalAlpha = 1;
+    } else if (f.kind === 'ring') {
+      const k = 1 - f.life / f.max;
+      ctx.strokeStyle = `rgba(${f.color},${(1 - k) * 0.9})`; ctx.lineWidth = 3;
+      ctx.setLineDash([8, 6]);
+      ctx.beginPath(); ctx.arc(f.x, f.y, f.r * (0.6 + k * 0.4), 0, Math.PI * 2); ctx.stroke();
+      ctx.setLineDash([]);
     } else if (f.kind === 'boom') {
       const k = 1 - f.life / f.max;
       ctx.globalAlpha = 1 - k;
@@ -504,6 +642,7 @@ function drawBattleAir(ctx) {
       ctx.globalAlpha = 1;
     }
   }
+  for (const pl of B.planes) drawJet(ctx, pl.x, pl.y, pl.a);
   // building health bars
   for (const b of S.buildings) {
     if (b._dead || b._hp >= b._maxhp || b.type === 'wall' && b._hp > b._maxhp * 0.98) continue;
@@ -539,21 +678,32 @@ function drawEnemy(ctx, u) {
   } else if (e.vehicle) {
     ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.beginPath(); ctx.ellipse(3, 4, e.r + 3, e.r * 0.8, 0, 0, Math.PI * 2); ctx.fill();
     ctx.save(); ctx.rotate(u.angle);
-    const L = u.type === 'tank' ? 34 : 24, W = u.type === 'tank' ? 22 : 14;
-    if (u.type === 'tank') {
+    const big = u.type === 'siege';
+    const L = big ? 52 : u.type === 'tank' ? 34 : 24, W = big ? 34 : u.type === 'tank' ? 22 : 14;
+    if (u.type === 'tank' || big) {
       ctx.fillStyle = '#2a2420';
       ctx.fillRect(-L / 2, -W / 2 - 2, L, 6); ctx.fillRect(-L / 2, W / 2 - 4, L, 6);
       ctx.fillStyle = '#4a403a';
-      for (let i = 0; i < 6; i++) { const o = ((u.walk * 2 + i * 6) % 34) - 17; ctx.fillRect(o, -W / 2 - 2, 2, 6); ctx.fillRect(o, W / 2 - 4, 2, 6); }
+      for (let i = 0; i < L / 6; i++) { const o = ((u.walk * 2 + i * 6) % L) - L / 2; ctx.fillRect(o, -W / 2 - 2, 2, 6); ctx.fillRect(o, W / 2 - 4, 2, 6); }
     } else {
       ctx.fillStyle = '#1e1a18';
       for (const [wx, wy] of [[-8, -8], [6, -8], [-8, 8], [6, 8]]) { ctx.fillRect(wx - 3, wy - 2, 6, 4); }
     }
-    ctx.fillStyle = u.hit > 0 ? '#ffffff' : ENEMY_COL.hull; rr(ctx, -L / 2 + 2, -W / 2 + 2, L - 4, W - 4, 3); ctx.fill();
+    ctx.fillStyle = u.hit > 0 ? '#ffffff' : big ? '#4e3a30' : ENEMY_COL.hull; rr(ctx, -L / 2 + 2, -W / 2 + 2, L - 4, W - 4, 3); ctx.fill();
     ctx.fillStyle = ENEMY_COL.hullDark; ctx.fillRect(L / 2 - 8, -W / 2 + 3, 4, W - 6);
+    if (big) { ctx.fillStyle = '#c8402a'; ctx.fillRect(-L / 2 + 6, -W / 2 + 4, 6, W - 8); }
     ctx.restore();
     // turret
     ctx.rotate(u.aim);
+    if (big) {
+      ctx.fillStyle = '#211b18'; ctx.fillRect(6, -7, 30, 5); ctx.fillRect(6, 2, 30, 5);
+      ctx.fillStyle = '#3a2c25'; rr(ctx, -13, -12, 26, 24, 6); ctx.fill();
+      ctx.fillStyle = '#c8402a'; ctx.beginPath(); ctx.arc(-4, 0, 3, 0, Math.PI * 2); ctx.fill();
+      if (u.flash > 0) { ctx.fillStyle = '#ffd36b'; ctx.beginPath(); ctx.arc(39, -4.5, 6, 0, Math.PI * 2); ctx.arc(39, 4.5, 6, 0, Math.PI * 2); ctx.fill(); }
+      ctx.restore();
+      drawEnemyBar(ctx, u, e);
+      return;
+    }
     ctx.fillStyle = '#2a2420'; ctx.fillRect(4, -2, u.type === 'tank' ? 22 : 12, u.type === 'tank' ? 4 : 2.5);
     ctx.fillStyle = ENEMY_COL.hullDark; ctx.beginPath(); ctx.arc(0, 0, u.type === 'tank' ? 8 : 5, 0, Math.PI * 2); ctx.fill();
     if (u.flash > 0) { ctx.fillStyle = '#ffd36b'; ctx.beginPath(); ctx.arc(u.type === 'tank' ? 28 : 18, 0, 4, 0, Math.PI * 2); ctx.fill(); }
@@ -562,23 +712,41 @@ function drawEnemy(ctx, u) {
     ctx.translate(0, bob);
     ctx.rotate(u.aim);
     ctx.fillStyle = '#1e1a18'; ctx.fillRect(2, 1, u.type === 'grenadier' ? 9 : 11, 2);
-    ctx.fillStyle = u.hit > 0 ? '#ffffff' : ENEMY_COL.body;
+    ctx.fillStyle = u.hit > 0 ? '#ffffff' : u.type === 'medic' ? '#e9e4d4' : ENEMY_COL.body;
     ctx.beginPath(); ctx.ellipse(0, 0, e.r * 0.7, e.r, 0, 0, Math.PI * 2); ctx.fill();
+    if (u.type === 'medic') { ctx.fillStyle = '#c8402a'; ctx.fillRect(-1, -4, 2, 8); ctx.fillRect(-4, -1, 8, 2); }
     if (u.type === 'grenadier') { ctx.fillStyle = ENEMY_COL.dark; ctx.fillRect(-e.r * 0.9, -4, 4, 8); }
     ctx.fillStyle = ENEMY_COL.helmet; ctx.beginPath(); ctx.arc(0, 0, e.r * 0.55, 0, Math.PI * 2); ctx.fill();
     if (u.flash > 0) { ctx.fillStyle = '#ffd36b'; ctx.beginPath(); ctx.arc(13, 2, 2.5, 0, Math.PI * 2); ctx.fill(); }
   }
   ctx.restore();
+  drawEnemyBar(ctx, u, e);
+}
+
+function drawEnemyBar(ctx, u, e) {
   if (u.hit > 0) u.hit -= 1 / 60;
-  if (u.hp < u.max) {
-    const w = e.vehicle ? 26 : e.air ? 20 : 14, y = u.y - (u.air ? 34 : e.r + 10);
-    ctx.fillStyle = 'rgba(16,18,12,0.8)'; ctx.fillRect(u.x - w / 2 - 1, y - 1, w + 2, 4);
-    ctx.fillStyle = '#e0503a'; ctx.fillRect(u.x - w / 2, y, w * Math.max(0, u.hp / u.max), 2);
+  if (u.healFx > 0) {
+    ctx.strokeStyle = `rgba(140,230,120,${u.healFx * 2})`; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(u.x, u.y, e.r + 4, 0, Math.PI * 2); ctx.stroke();
+  }
+  if (u.hp < u.max || e.boss) {
+    const w = e.boss ? 60 : e.vehicle ? 26 : e.air ? 20 : 14, y = u.y - (u.air ? 34 : e.r + 10);
+    const h = e.boss ? 5 : 2;
+    ctx.fillStyle = 'rgba(16,18,12,0.8)'; ctx.fillRect(u.x - w / 2 - 1, y - 1, w + 2, h + 2);
+    ctx.fillStyle = '#e0503a'; ctx.fillRect(u.x - w / 2, y, w * Math.max(0, u.hp / u.max), h);
+    if (e.boss) {
+      ctx.font = '10px "Black Ops One", Impact, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+      ctx.fillStyle = '#f2b632'; ctx.fillText('SIEGE TANK', u.x, y - 2);
+    }
   }
 }
 
 function drawShot(ctx, p) {
-  if (p.kind === 'mortar' || p.kind === 'enemy-shell') {
+  if (p.kind === 'bomb') {
+    const k = Math.min(1, p.t / p.dur);
+    ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.beginPath(); ctx.ellipse(p.tx, p.ty, 3 + k * 5, 2 + k * 3, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#2b2e25'; ctx.beginPath(); ctx.ellipse(p.x, p.y, 3, 5, 0, 0, Math.PI * 2); ctx.fill();
+  } else if (p.kind === 'mortar' || p.kind === 'enemy-shell') {
     const h = p.h || 0;
     ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.beginPath(); ctx.ellipse(p.x, p.y, 4, 2, 0, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = p.kind === 'mortar' ? '#2b2e25' : '#3a1610';
@@ -623,12 +791,23 @@ function updateBattleHUD() {
     f.style.background = k > 0.5 ? '#7fbf4d' : k > 0.25 ? '#f2b632' : '#c8402a';
   }
   setText($('#bh-kills'), 'bk', String(B.kills));
+  for (const k of ['airstrike', 'repair']) {
+    const el = $(`#ab-${k}`);
+    const cd = B.ab[k], max = ABILITIES[k].cooldown;
+    const label = cd > 0 ? String(Math.ceil(cd)) : '';
+    setText(el.querySelector('.ab-cd'), 'ab' + k, label);
+    el.classList.toggle('cooling', cd > 0);
+    el.style.setProperty('--p', cd > 0 ? (cd / max * 100).toFixed(1) + '%' : '0%');
+    el.classList.toggle('armed', k === 'airstrike' && B.targeting);
+  }
 }
 
 let retreatArmed = 0;
 function setSpeedLabel() { $('#btn-speed span').textContent = `Speed x${B ? B.speed : 1}`; }
 
 function initBattleUI() {
+  $('#ab-airstrike').addEventListener('click', armAirstrike);
+  $('#ab-repair').addEventListener('click', useRepair);
   $('#btn-speed').addEventListener('click', () => {
     if (!B) return;
     B.speed = B.speed === 1 ? 2 : B.speed === 2 ? 3 : 1;

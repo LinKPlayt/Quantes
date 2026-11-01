@@ -23,10 +23,30 @@ Open `index.html` in a browser, or host the folder on any static host (GitHub Pa
   - Kills and cleared waves pay gold and steel; damage is repaired after the battle
   - Speed x1/x2/x3, retreat, best-wave record
 
+## Update 2: sixteen new features
+
+1. **Sound effects** – synthesized gunfire, explosions, building, collecting, alarms (toggle in the menu)
+2. **Vibration** – phone buzzes on big explosions, boss waves and rewards (toggle in the menu)
+3. **Medals** – new currency from battles, missions, promotions and supply drops
+4. **Finish now** – spend medals to complete construction instantly
+5. **Hire builders** – tap the builders counter to hire a 3rd and 4th builder
+6. **Collect all** – one button empties every mine and foundry
+7. **Flame Bunker** – new short-range defense (HQ 2) that burns groups of infantry
+8. **Airstrike** – battle ability: tap the map and a jet carpet-bombs that spot
+9. **Field Repair** – battle ability: patches every standing building by 30%
+10. **Boss waves** – every 5th wave brings a Siege Tank
+11. **Field Medic** – new enemy (wave 4+) that heals nearby attackers
+12. **Missions** – 15 objectives with gold, steel and medal rewards
+13. **Commander ranks** – earn XP from building and fighting, get promoted from Private to General
+14. **Supply drops** – a crate parachutes into the base every couple of hours
+15. **Rename your base** – tap the badge in the top-left
+16. **Battle damage report** and **upgrade all walls of a level at once**
+
 ## Code layout
 
 - `js/data.js` – building stats, costs, limits per HQ level, wave previews
 - `js/render.js` – procedural terrain and building art (canvas)
+- `js/audio.js` – synthesized sound effects and vibration
 - `js/battle.js` – battle mode: waves, enemy pathing (flow field), turret fire, rewards
 - `js/game.js` – state, saving, placement, input, HUD and main loop
 - `style.css` – HUD, panels, shop and modals

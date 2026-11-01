@@ -516,6 +516,33 @@ DRAW.missile = function (ctx, b, t) {
   ctx.restore();
 };
 
+DRAW.flame = function (ctx, b, t) {
+  const S = 2 * TILE, x = b.x * TILE, y = b.y * TILE, L = Math.max(1, b.level);
+  pad(ctx, x, y, S, PAL.concreteDark, 3);
+  // fuel tanks behind the bunker
+  for (let i = 0; i < Math.min(3, 1 + Math.ceil(L / 2)); i++) {
+    const tx = x + 10 + i * 13, ty = y + 18;
+    ctx.fillStyle = PAL.shadow; ctx.beginPath(); ctx.ellipse(tx + 8, ty + 3, 6, 4, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#7a2a1c'; rr(ctx, tx - 5, ty - 16, 10, 18, 4); ctx.fill();
+    ctx.fillStyle = '#b8432b'; rr(ctx, tx - 5, ty - 16, 6, 18, 4); ctx.fill();
+    ctx.fillStyle = PAL.hazard; ctx.fillRect(tx - 5, ty - 9, 10, 2);
+  }
+  const body = L >= 4 ? '#6f7a80' : '#8a8676';
+  box(ctx, x + 12, y + 34, 56, 34, 12, shade(body, 0.1), shade(body, -0.35), 10);
+  ctx.fillStyle = '#1d1f19'; rr(ctx, x + 22, y + 52, 36, 5, 2); ctx.fill(); // firing slit
+  // nozzle turret
+  const cx = x + S / 2, cy = y + 40;
+  ctx.save(); ctx.translate(cx, cy); ctx.rotate(b.angle);
+  ctx.fillStyle = '#2b2e25'; rr(ctx, 4, -3.5, 18 + L, 7, 2); ctx.fill();
+  ctx.fillStyle = '#c8402a'; ctx.fillRect(18 + L, -4, 4, 8);
+  ctx.fillStyle = shade(body, -0.2); ctx.beginPath(); ctx.arc(0, 0, 10, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = shade(body, 0.15); ctx.beginPath(); ctx.arc(-1.5, -1.5, 7, 0, Math.PI * 2); ctx.fill();
+  // pilot light
+  ctx.fillStyle = Math.sin(t * 12 + b.id) > 0 ? '#ffb347' : '#ff7a2f';
+  ctx.beginPath(); ctx.arc(24 + L, 0, 2, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+};
+
 DRAW.wall = function (ctx, b, t, neighbors) {
   const x = b.x * TILE, y = b.y * TILE, L = Math.max(1, b.level);
   const h = 8 + L * 2;
@@ -649,4 +676,39 @@ function renderPreview(type, level, px) {
     DRAW[type](ctx, fake, 1.3);
   }
   return c;
+}
+
+// Parachuted supply crate waiting to be opened.
+function drawSupplyCrate(ctx, x, y, t) {
+  const bob = Math.sin(t * 2.5) * 2;
+  ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.beginPath(); ctx.ellipse(x + 3, y + 12, 16, 7, 0, 0, Math.PI * 2); ctx.fill();
+  // parachute draped behind
+  ctx.fillStyle = '#e9e4d4'; ctx.beginPath(); ctx.ellipse(x - 10, y + 6, 14, 7, -0.4, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#c8402a'; ctx.beginPath(); ctx.ellipse(x - 10, y + 6, 14, 7, -0.4, 0, Math.PI); ctx.fill();
+  box(ctx, x - 12, y - 6 + bob, 24, 16, 14, '#8a7a3c', '#5e5228', 2);
+  ctx.strokeStyle = 'rgba(0,0,0,0.35)'; ctx.lineWidth = 1.5;
+  ctx.strokeRect(x - 9, y - 18 + bob, 18, 10);
+  ctx.fillStyle = PAL.hazard;
+  ctx.font = 'bold 8px "Chakra Petch", sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText('SUPPLY', x, y - 13 + bob);
+  // beacon
+  const glow = 0.5 + Math.sin(t * 6) * 0.5;
+  ctx.fillStyle = `rgba(255,90,60,${glow})`; ctx.beginPath(); ctx.arc(x + 9, y - 22 + bob, 3, 0, Math.PI * 2); ctx.fill();
+}
+
+// Friendly jet for the airstrike, drawn at (x,y) heading angle a.
+function drawJet(ctx, x, y, a) {
+  ctx.save();
+  ctx.fillStyle = 'rgba(0,0,0,0.22)';
+  ctx.translate(x + 40, y + 60); ctx.rotate(a);
+  ctx.beginPath(); ctx.moveTo(26, 0); ctx.lineTo(-18, -22); ctx.lineTo(-12, 0); ctx.lineTo(-18, 22); ctx.closePath(); ctx.fill();
+  ctx.restore();
+  ctx.save(); ctx.translate(x, y); ctx.rotate(a);
+  ctx.fillStyle = '#5d6b4a';
+  ctx.beginPath(); ctx.moveTo(28, 0); ctx.lineTo(-4, -24); ctx.lineTo(-10, -24); ctx.lineTo(-2, 0); ctx.lineTo(-10, 24); ctx.lineTo(-4, 24); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#4a5639'; rr(ctx, -22, -4, 52, 8, 4); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(-14, 0); ctx.lineTo(-24, -9); ctx.lineTo(-26, 9); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#9fd0e8'; rr(ctx, 12, -2.5, 10, 5, 2.5); ctx.fill();
+  ctx.fillStyle = '#ffb347'; ctx.beginPath(); ctx.arc(-24, 0, 3, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
 }

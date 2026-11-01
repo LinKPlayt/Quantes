@@ -23,13 +23,14 @@
   <canvas id="view" aria-label="Your base"></canvas>
 
   <header id="hud-top">
-    <div id="hq-badge" class="hud-box">
+    <button id="hq-badge" class="hud-box" aria-label="Rename base">
       <div class="rank">1</div>
       <div class="badge-text">
         <div class="base-name">Outpost Bravo</div>
-        <div class="sub">HQ LEVEL 1</div>
+        <div class="sub">PRIVATE · HQ 1</div>
+        <div class="xp-bar"><div class="xp-fill"></div></div>
       </div>
-    </div>
+    </button>
     <div class="res-group">
       <div id="res-gold" class="res hud-box">
         <svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="11" r="8" fill="#b88a1c"/><circle cx="10" cy="10" r="8" fill="#f5c542"/><circle cx="7.5" cy="7.5" r="2.2" fill="#fff1b0"/></svg>
@@ -45,11 +46,19 @@
           <div class="bar"><div class="fill"></div></div>
         </div>
       </div>
-      <div id="builders" class="hud-box" title="Free builders">
+      <button id="medals" class="hud-box" aria-label="Medals" tabindex="-1">
+        <svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M6 1h3l1 5-3 1zM14 1h-3l-1 5 3 1z" fill="#c8402a"/><circle cx="10" cy="12" r="6.5" fill="#b9851a"/><circle cx="10" cy="12" r="5" fill="#f2b632"/><path d="M10 8.6l1 2.1 2.3.3-1.7 1.6.4 2.3-2-1.1-2 1.1.4-2.3-1.7-1.6 2.3-.3z" fill="#fff1b0"/></svg>
+        <span class="amt">10</span>
+      </button>
+      <button id="builders" class="hud-box" aria-label="Builders">
         <svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M11 4l5 5-2 2-5-5z" fill="#c9b27a"/><path d="M8.5 7.5l3 3-7 7-3-3z" fill="#7a5c3d"/><path d="M9 3h5l3 3-2 1-3-2H9z" fill="#9aa5ad"/></svg>
         <span class="amt">2/2</span>
-      </div>
+      </button>
     </div>
+    <button id="btn-missions" class="hud-box icon-btn" aria-label="Missions">
+      <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="4" y="3" width="12" height="15" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M7 3V1.8h6V3M7 8h6M7 11.5h6M7 15h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none"/></svg>
+      <span class="dot"></span>
+    </button>
     <button id="btn-menu" class="hud-box icon-btn" aria-label="Menu">
       <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 5h14M3 10h14M3 15h14" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
     </button>
@@ -58,6 +67,10 @@
   <button id="btn-build" class="big-btn">
     <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M11 4l5 5-2 2-5-5z" fill="#2a2414"/><path d="M8.5 7.5l3 3-7 7-3-3z" fill="#2a2414"/><path d="M9 3h5l3 3-2 1-3-2H9z" fill="#2a2414"/></svg>
     <span>Build</span>
+  </button>
+  <button id="btn-collect" class="hud-box" hidden>
+    <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8" cy="11" r="6" fill="#b88a1c"/><circle cx="8" cy="10" r="6" fill="#f5c542"/><path d="M11 15h8l-1.5-4h-5z" fill="#4f5961"/><path d="M12.5 11h5l-1-2.2h-3z" fill="#a9b6c1"/></svg>
+    <span>Collect all</span>
   </button>
   <button id="btn-battle" class="big-btn">
     <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 16L14 6M14 6l-1-3 4 0 0 4-3-1M6 6l10 10M6 6l1-3-4 0 0 4 3-1" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -68,6 +81,16 @@
     <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 4l7 6-7 6zM10 4l7 6-7 6z" fill="currentColor"/></svg>
     <span>Speed x1</span>
   </button>
+  <div id="abilities" class="battle-only">
+    <button id="ab-airstrike" class="ab-btn" aria-label="Airstrike">
+      <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 1.5l1.6 5.5 6.4 3.5v1.6l-6.4-1.7-.4 4.6 2 1.6v1.3L10 17l-3.2.9v-1.3l2-1.6-.4-4.6L2 12.1v-1.6L8.4 7z" fill="currentColor"/></svg>
+      <span class="ab-name">Airstrike</span><span class="ab-cd"></span>
+    </button>
+    <button id="ab-repair" class="ab-btn" aria-label="Field repair">
+      <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M14.5 2.5a4 4 0 0 0-4.7 5.3L3 14.6 5.4 17l6.8-6.8a4 4 0 0 0 5.3-4.7l-2.4 2.4-2.3-.6-.6-2.3z" fill="currentColor"/></svg>
+      <span class="ab-name">Repair</span><span class="ab-cd"></span>
+    </button>
+  </div>
   <button id="btn-retreat" class="big-btn battle-only">
     <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 3v15" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M6 4h10l-3 3.5 3 3.5H6z" fill="currentColor"/></svg>
     <span>Retreat</span>
@@ -122,6 +145,7 @@
 </div>
 <script src="js/data.js"></script>
 <script src="js/render.js"></script>
+<script src="js/audio.js"></script>
 <script src="js/battle.js"></script>
 <script src="js/game.js"></script>
 </body>
