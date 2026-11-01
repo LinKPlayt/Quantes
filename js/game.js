@@ -615,13 +615,73 @@ function update(dt) {
   floaters = floaters.filter(f => f.life > 0);
 }
 
+/* ---------------- Ambient: drifting cloud shadows and passing birds ---------------- */
+const clouds = [];
+let cloudBlob = null;
+let birds = null, birdTimer = 12;
+
+function initAmbient() {
+  cloudBlob = document.createElement('canvas');
+  cloudBlob.width = cloudBlob.height = 128;
+  const g = cloudBlob.getContext('2d');
+  const grad = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+  grad.addColorStop(0, 'rgba(10,20,5,1)'); grad.addColorStop(0.6, 'rgba(10,20,5,0.55)'); grad.addColorStop(1, 'rgba(10,20,5,0)');
+  g.fillStyle = grad; g.fillRect(0, 0, 128, 128);
+  const W = MAP_W * TILE, H = MAP_H * TILE;
+  for (let i = 0; i < 5; i++) {
+    clouds.push({ x: Math.random() * W, y: Math.random() * H, w: 260 + Math.random() * 260, h: 140 + Math.random() * 120, s: 6 + Math.random() * 6 });
+  }
+}
+
+function updateAmbient(dt) {
+  const W = MAP_W * TILE;
+  for (const c of clouds) { c.x += c.s * dt; if (c.x - c.w > W) c.x = -c.w; }
+  if (birds) {
+    for (const b of birds.list) { b.x += birds.vx * dt; b.y += birds.vy * dt; }
+    birds.t += dt;
+    if (birds.t > 40) birds = null;
+  } else if (!B && (birdTimer -= dt) <= 0) {
+    birdTimer = 25 + Math.random() * 25;
+    const fromLeft = Math.random() < 0.5, H = MAP_H * TILE;
+    const y0 = H * (0.2 + Math.random() * 0.6), vx = (fromLeft ? 1 : -1) * (70 + Math.random() * 30), vy = (Math.random() - 0.5) * 30;
+    const x0 = fromLeft ? -60 : W + 60;
+    const list = [];
+    for (let i = 0; i < 5 + (Math.random() * 4 | 0); i++) list.push({ x: x0 - Math.sign(vx) * (i * 18 + Math.random() * 10), y: y0 + (i % 2 ? 1 : -1) * Math.ceil(i / 2) * 14, p: Math.random() * 6 });
+    birds = { list, vx, vy, t: 0 };
+  }
+}
+
+function drawCloudShadows() {
+  if (!cloudBlob) return;
+  ctx.globalAlpha = 0.11;
+  for (const c of clouds) ctx.drawImage(cloudBlob, c.x - c.w / 2, c.y - c.h / 2, c.w, c.h);
+  ctx.globalAlpha = 1;
+}
+
+function drawBirds() {
+  if (!birds) return;
+  const dir = Math.sign(birds.vx);
+  for (const b of birds.list) {
+    const flap = Math.sin(tSec * 10 + b.p) * 4;
+    ctx.fillStyle = 'rgba(0,0,0,0.15)';
+    ctx.beginPath(); ctx.ellipse(b.x + 30, b.y + 40, 4, 1.6, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#1e1f1a'; ctx.lineWidth = 1.8; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(b.x - 6 * dir, b.y - flap); ctx.lineTo(b.x, b.y); ctx.lineTo(b.x - 6 * dir, b.y + flap); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(b.x - 6, b.y - flap * 0.2); ctx.quadraticCurveTo(b.x - 3, b.y - 5 - flap, b.x, b.y); ctx.quadraticCurveTo(b.x + 3, b.y - 5 - flap, b.x + 6, b.y - flap * 0.2); ctx.stroke();
+  }
+  ctx.lineCap = 'butt';
+}
+
+let frameDt = 0;
 function draw() {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.fillStyle = '#2c3a20';
   ctx.fillRect(0, 0, vw, vh);
   const z = cam.z;
-  ctx.setTransform(dpr * z, 0, 0, dpr * z, dpr * (vw / 2 - cam.x * z), dpr * (vh / 2 - cam.y * z));
+  const sh = shakeOffset(frameDt);
+  ctx.setTransform(dpr * z, 0, 0, dpr * z, dpr * (vw / 2 - cam.x * z + sh.x), dpr * (vh / 2 - cam.y * z + sh.y));
   if (ground) ctx.drawImage(ground, 0, 0, MAP_W * TILE, MAP_H * TILE);
+  drawBattleDecals(ctx);
 
   if (placing) drawGridOverlay();
 
@@ -662,18 +722,22 @@ function draw() {
     drawCoinIcon(ctx, p.x, p.y, 8, DEFS[b.type].produces);
   }
 
+  drawCloudShadows();
   for (const p of particles) {
     const a = clamp(p.life / p.max, 0, 1);
     const smoke = p.color === 'smoke' || p.color === 'smoke-dark';
     ctx.globalAlpha = smoke ? a * 0.45 : a;
+    if (p.glow) ctx.globalCompositeOperation = 'lighter';
     ctx.fillStyle = p.color === 'smoke' ? '#cfcabb' : p.color === 'smoke-dark' ? '#3a3632' : p.color;
     ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.fill();
+    if (p.glow) ctx.globalCompositeOperation = 'source-over';
   }
   ctx.globalAlpha = 1;
+  drawBirds();
   drawBattleAir(ctx);
   for (const f of floaters) {
     ctx.globalAlpha = clamp(f.life / f.max * 1.5, 0, 1);
-    ctx.font = '22px "Black Ops One", Impact, sans-serif';
+    ctx.font = `${f.size || 22}px "Black Ops One", Impact, sans-serif`;
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillText(f.text, f.x + 2, f.y + 2);
     ctx.fillStyle = f.color; ctx.fillText(f.text, f.x, f.y);
@@ -749,6 +813,8 @@ function frame(now) {
   const dt = Math.min(0.1, (now - lastFrame) / 1000);
   lastFrame = now;
   update(dt);
+  updateAmbient(dt);
+  frameDt = dt;
   draw();
   updateHUD();
   updateBattleHUD();
@@ -1112,11 +1178,13 @@ $('#btn-battle').addEventListener('click', () => {
       </div>
       <div class="brief-foot">
         <button class="btn battle-go" id="btn-deploy">Start battle</button>
+        <button class="btn ghost" id="btn-intel">Enemy guide</button>
         <span class="soon">Tip: walls slow the enemy down while your turrets fire.</span>
         <button class="btn ghost" data-close>Back to base</button>
       </div>
     </div>`);
   $('#btn-deploy').addEventListener('click', startBattle);
+  $('#btn-intel').addEventListener('click', () => openFieldGuide(true));
 });
 
 $('#btn-menu').addEventListener('click', () => {
@@ -1362,6 +1430,7 @@ function start(hotData) {
   resize();
   recenter();
   ground = buildGroundCanvas(1.5);
+  initAmbient();
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { ground = buildGroundCanvas(1.5); });
   window.addEventListener('resize', () => { resize(); });
   document.addEventListener('visibilitychange', () => { if (document.hidden) save(); });

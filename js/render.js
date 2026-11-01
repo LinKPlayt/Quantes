@@ -234,6 +234,13 @@ function buildGroundCanvas(scale) {
     }
   }
 
+  // soft late-afternoon light: warm from the top-left, shade toward the bottom-right
+  const light = g.createLinearGradient(0, 0, W, H);
+  light.addColorStop(0, 'rgba(255,236,180,0.10)');
+  light.addColorStop(0.55, 'rgba(255,236,180,0)');
+  light.addColorStop(1, 'rgba(0,10,0,0.18)');
+  g.fillStyle = light; g.fillRect(0, 0, W, H);
+
   // stencilled compound marking
   g.save();
   g.globalAlpha = 0.14; g.fillStyle = '#e8e2c8';

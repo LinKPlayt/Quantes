@@ -42,6 +42,19 @@ Open `index.html` in a browser, or host the folder on any static host (GitHub Pa
 15. **Rename your base** – tap the badge in the top-left
 16. **Battle damage report** and **upgrade all walls of a level at once**
 
+## Update 4: new enemies and graphics
+
+**Seven new enemy types** (14 total), each with its own art and behavior:
+Scout Bike (fast raider) · Sapper (suicide charge) · Troop Carrier (drops 4 riflemen when destroyed) ·
+Flame Trooper (burns buildings) · Heavy Gunner (armor shrugs off light bullets) ·
+Gunship (armored helicopter) · Artillery Truck (shells from long range).
+New arrivals are announced at the start of a wave, and the battle briefing has an **Enemy guide**.
+
+**Graphics:** redrawn soldiers with walking legs and gear, detailed vehicles, explosions with shockwaves and
+light flashes, muzzle flashes, camera shake, craters, tank tracks and wrecks left on the battlefield,
+burning buildings, big-hit damage numbers, drifting cloud shadows, birds over the base, warm lighting,
+a vignette that pulses red when the Command Center is in danger.
+
 ## Code layout
 
 - `js/data.js` – building stats, costs, limits per HQ level, wave previews

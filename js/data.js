@@ -230,6 +230,13 @@ const ENEMIES = {
   tank:      { name: 'Light Tank',   hp: 850, speed: 0.55, dmg: 60, rate: 0.35, range: 4.0, splash: 0.7, bounty: 40, r: 14, vehicle: true },
   drone:     { name: 'Attack Drone', hp: 110, speed: 1.5,  dmg: 12, rate: 1.0,  range: 1.4, bounty: 12, r: 9, air: true },
   medic:     { name: 'Field Medic',  hp: 70,  speed: 1.0,  dmg: 2,  rate: 1.0,  range: 1.8, bounty: 8,  r: 6, heal: 14, healRange: 2.2 },
+  moto:      { name: 'Scout Bike',   hp: 45,  speed: 2.6,  dmg: 4,  rate: 2.0,  range: 1.6, bounty: 5,  r: 8, vehicle: true },
+  sapper:    { name: 'Sapper',       hp: 80,  speed: 1.3,  dmg: 260, rate: 1.0, range: 0.8, splash: 1.2, bounty: 9, r: 6, sapper: true },
+  apc:       { name: 'Troop Carrier', hp: 520, speed: 1.0, dmg: 6,  rate: 2.0,  range: 2.6, bounty: 25, r: 13, vehicle: true, carries: { type: 'rifleman', count: 4 } },
+  flamer:    { name: 'Flame Trooper', hp: 120, speed: 0.9, dmg: 7,  rate: 5.0,  range: 1.6, bounty: 10, r: 7, flamer: true },
+  heavy:     { name: 'Heavy Gunner', hp: 260, speed: 0.6,  dmg: 6,  rate: 4.0,  range: 2.6, bounty: 18, r: 9, armor: 8 },
+  heli:      { name: 'Gunship',      hp: 650, speed: 1.1,  dmg: 45, rate: 0.7,  range: 3.2, splash: 0.6, bounty: 45, r: 16, air: true },
+  artillery: { name: 'Artillery Truck', hp: 420, speed: 0.5, dmg: 70, rate: 0.25, range: 6.5, splash: 0.9, bounty: 35, r: 12, vehicle: true, lob: true },
   siege:     { name: 'Siege Tank',   hp: 2600, speed: 0.38, dmg: 130, rate: 0.3, range: 4.5, splash: 1.0, bounty: 220, r: 20, vehicle: true, boss: true },
 };
 
@@ -245,11 +252,42 @@ function waveComposition(n) {
   if (n >= 5) list.push({ type: 'tank', count: Math.floor((n - 3) / 2) });
   if (n >= 7) list.push({ type: 'drone', count: Math.floor((n - 5) / 2) });
   if (n >= 4) list.push({ type: 'medic', count: Math.floor((n - 2) / 2) });
+  if (n >= 2) list.push({ type: 'moto', count: Math.floor(n / 3) + 1 });
+  if (n >= 3) list.push({ type: 'sapper', count: Math.floor((n - 1) / 3) });
+  if (n >= 6) list.push({ type: 'apc', count: Math.floor((n - 3) / 3) });
+  if (n >= 6) list.push({ type: 'flamer', count: Math.floor((n - 4) / 3) });
+  if (n >= 8) list.push({ type: 'heavy', count: Math.floor((n - 6) / 2) });
+  if (n >= 9) list.push({ type: 'heli', count: Math.floor((n - 6) / 3) });
+  if (n >= 10) list.push({ type: 'artillery', count: Math.floor((n - 7) / 3) });
   if (isBossWave(n)) list.push({ type: 'siege', count: 1 + Math.floor(n / 15) });
   return list;
 }
 
 function isBossWave(n) { return n % 5 === 0; }
+
+// First wave in which each enemy type appears (for the field guide and "new enemy" alerts).
+function firstWaveOf(type) {
+  for (let n = 1; n <= 60; n++) if (waveComposition(n).some(g => g.type === type && g.count > 0)) return n;
+  return 99;
+}
+
+// One-line field notes for the enemy guide.
+const ENEMY_NOTES = {
+  rifleman: 'Basic infantry. Comes in numbers.',
+  grenadier: 'Throws grenades that splash nearby buildings.',
+  jeep: 'Fast armored car with a mounted gun.',
+  tank: 'Slow and tough. Its shells hit hard.',
+  drone: 'Flies over walls. Only air-capable defenses can hit it.',
+  medic: 'Heals injured attackers around it. Kill it first.',
+  moto: 'Very fast and fragile. Races ahead of the main force.',
+  sapper: 'Runs at the nearest building and blows itself up.',
+  apc: 'Armored carrier. Four riflemen jump out when it is destroyed.',
+  flamer: 'Short range, but burns buildings quickly.',
+  heavy: 'Body armor shrugs off light bullets. Use heavy guns.',
+  heli: 'Armored gunship that rockets your buildings from the air.',
+  artillery: 'Shells your base from long range. Hunt it with long-range defenses or airstrikes.',
+  siege: 'Boss of every fifth wave. Enormous armor and firepower.',
+};
 
 // Which roads the enemy uses at a given wave.
 function waveGates(n) {
