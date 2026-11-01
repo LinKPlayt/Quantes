@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>WarBreach</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="theme-color" content="#1b2016">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="WarBreach">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Black+Ops+One&family=Chakra+Petch:wght@400;600;700&display=swap">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <canvas id="view" aria-label="Your base"></canvas>
+
+  <header id="hud-top">
+    <div id="hq-badge" class="hud-box">
+      <div class="rank">1</div>
+      <div class="badge-text">
+        <div class="base-name">Outpost Bravo</div>
+        <div class="sub">HQ LEVEL 1</div>
+      </div>
+    </div>
+    <div class="res-group">
+      <div id="res-gold" class="res hud-box">
+        <svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="11" r="8" fill="#b88a1c"/><circle cx="10" cy="10" r="8" fill="#f5c542"/><circle cx="7.5" cy="7.5" r="2.2" fill="#fff1b0"/></svg>
+        <div class="res-body">
+          <div class="res-nums"><span class="amt">0</span><span class="cap">/ 0</span></div>
+          <div class="bar"><div class="fill"></div></div>
+        </div>
+      </div>
+      <div id="res-steel" class="res hud-box">
+        <svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M2 15h16l-3-7H5z" fill="#4f5961"/><path d="M5 8h10l-2-4H7z" fill="#a9b6c1"/></svg>
+        <div class="res-body">
+          <div class="res-nums"><span class="amt">0</span><span class="cap">/ 0</span></div>
+          <div class="bar"><div class="fill"></div></div>
+        </div>
+      </div>
+      <div id="builders" class="hud-box" title="Free builders">
+        <svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M11 4l5 5-2 2-5-5z" fill="#c9b27a"/><path d="M8.5 7.5l3 3-7 7-3-3z" fill="#7a5c3d"/><path d="M9 3h5l3 3-2 1-3-2H9z" fill="#9aa5ad"/></svg>
+        <span class="amt">2/2</span>
+      </div>
+    </div>
+    <button id="btn-menu" class="hud-box icon-btn" aria-label="Menu">
+      <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 5h14M3 10h14M3 15h14" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
+    </button>
+  </header>
+
+  <button id="btn-build" class="big-btn">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M11 4l5 5-2 2-5-5z" fill="#2a2414"/><path d="M8.5 7.5l3 3-7 7-3-3z" fill="#2a2414"/><path d="M9 3h5l3 3-2 1-3-2H9z" fill="#2a2414"/></svg>
+    <span>Build</span>
+  </button>
+  <button id="btn-battle" class="big-btn">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 16L14 6M14 6l-1-3 4 0 0 4-3-1M6 6l10 10M6 6l1-3-4 0 0 4 3-1" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <span>Battle</span>
+  </button>
+
+  <section id="panel" hidden></section>
+
+  <div id="place-ctrl" hidden>
+    <div class="place-info"><span id="place-label"></span><span id="place-cost"></span></div>
+    <div class="place-btns">
+      <button id="place-cancel" class="round-btn no" aria-label="Cancel">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5L5 15" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>
+      </button>
+      <button id="place-ok" class="round-btn yes" aria-label="Place here">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10.5l4 4 8-9" stroke="currentColor" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <div id="shop" class="overlay" hidden>
+    <div class="shop-box">
+      <div class="shop-head">
+        <h2>Construction</h2>
+        <div id="shop-tabs" class="tabs"></div>
+        <button id="shop-close" class="icon-btn close-btn" aria-label="Close shop">&times;</button>
+      </div>
+      <div id="shop-list"></div>
+    </div>
+  </div>
+
+  <div id="modal" class="overlay" hidden>
+    <div class="modal-box" id="modal-body"></div>
+  </div>
+
+  <div id="toasts" aria-live="polite"></div>
+
+  <div id="rotate">
+    <svg viewBox="0 0 64 64" aria-hidden="true"><rect x="20" y="8" width="24" height="44" rx="4" fill="none" stroke="currentColor" stroke-width="3"/><path d="M50 40a18 18 0 0 1-14 14" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><path d="M38 50l-3 4 4 3" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>
+    <div class="rot-title">Turn your phone sideways</div>
+    <div class="rot-sub">WarBreach plays in landscape.</div>
+  </div>
+</div>
+<script src="js/data.js"></script>
+<script src="js/render.js"></script>
+<script src="js/game.js"></script>
+</body>
+</html>
