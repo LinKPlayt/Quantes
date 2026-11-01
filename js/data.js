@@ -8,11 +8,12 @@ const BORDER = 4;           // non-buildable wilderness around the compound
 const START_BUILDERS = 2;   // simultaneous construction jobs at the start
 const MAX_BUILDERS = 4;
 const BUILDER_COST = [0, 0, 0, 25, 60]; // medals to hire builder #3 and #4
-const MAX_HQ = 8;
-const MAX_LEVEL = 8;
+const MAX_HQ = 12;
+const MAX_LEVEL = 12;
+const MAX_BUILD_TIME = 6 * 3600; // no single job takes longer than 6 hours
 
 // Storage that the Command Center provides on its own, per HQ level.
-const HQ_STORAGE = [0, 1500, 4000, 8000, 15000, 25000, 40000, 60000, 90000];
+const HQ_STORAGE = [0, 1500, 4000, 8000, 15000, 25000, 40000, 60000, 90000, 130000, 180000, 250000, 350000];
 
 /*
  * Progression: every Command Center level unlocks exactly one new defense
@@ -20,25 +21,32 @@ const HQ_STORAGE = [0, 1500, 4000, 8000, 15000, 25000, 40000, 60000, 90000];
  * Counts below are how many of each building you may own, indexed by HQ level (1..8).
  */
 const LIMITS = {
-  hq:         [0, 1, 1, 1, 1, 1, 1, 1, 1],
-  goldmine:   [0, 2, 2, 3, 3, 4, 4, 5, 5],
-  steelworks: [0, 1, 2, 2, 3, 3, 4, 4, 5],
-  depot:      [0, 1, 1, 2, 2, 2, 3, 3, 4],
-  mg:         [0, 2, 2, 3, 3, 4, 4, 5, 5],
-  cannon:     [0, 0, 1, 2, 2, 3, 3, 4, 4],
-  mortar:     [0, 0, 0, 1, 1, 2, 2, 3, 3],
-  flame:      [0, 0, 0, 0, 1, 2, 2, 3, 3],
-  sniper:     [0, 0, 0, 0, 0, 1, 2, 2, 3],
-  missile:    [0, 0, 0, 0, 0, 0, 1, 2, 2],
-  tesla:      [0, 0, 0, 0, 0, 0, 0, 1, 2],
-  howitzer:   [0, 0, 0, 0, 0, 0, 0, 0, 1],
-  wall:       [0, 20, 40, 60, 80, 100, 120, 140, 160],
+  hq:         [0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+  goldmine:   [0, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7],
+  steelworks: [0, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7],
+  depot:      [0, 1, 1, 2, 2, 2, 3, 3, 4, 4, 5, 5, 6],
+  mg:         [0, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7],
+  cannon:     [0, 0, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6],
+  mortar:     [0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5],
+  flame:      [0, 0, 0, 0, 1, 2, 2, 3, 3, 4, 4, 5, 5],
+  sniper:     [0, 0, 0, 0, 0, 1, 2, 2, 3, 3, 4, 4, 5],
+  missile:    [0, 0, 0, 0, 0, 0, 1, 2, 2, 3, 3, 4, 4],
+  tesla:      [0, 0, 0, 0, 0, 0, 0, 1, 2, 2, 3, 3, 4],
+  howitzer:   [0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 2, 3, 3],
+  flak:       [0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 2, 3],
+  railgun:    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 2],
+  rocketarty: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2],
+  laser:      [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+  mine:       [0, 0, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24],
+  wire:       [0, 0, 0, 6, 10, 14, 18, 22, 26, 30, 34, 38, 42],
+  wall:       [0, 20, 40, 60, 80, 100, 120, 140, 160, 180, 200, 220, 240],
 };
 
 // Category order drives the shop tabs.
 const CATEGORIES = [
   { id: 'defense', label: 'Defenses' },
   { id: 'economy', label: 'Economy' },
+  { id: 'traps',   label: 'Traps' },
   { id: 'walls',   label: 'Walls' },
 ];
 
@@ -56,10 +64,11 @@ const DEFS = {
     name: 'Command Center', code: 'HQ', cat: 'core', size: 3, max: MAX_HQ,
     desc: 'The heart of your base. Each level unlocks a new defense and lets every building go one level higher.',
     costTable: [null, { gold: 0, steel: 0 }, { gold: 800, steel: 400 }, { gold: 2500, steel: 1200 }, { gold: 6000, steel: 3000 },
-      { gold: 12000, steel: 6000 }, { gold: 22000, steel: 11000 }, { gold: 35000, steel: 18000 }, { gold: 55000, steel: 28000 }],
-    timeTable: [0, 0, 30, 120, 300, 600, 1200, 1800, 3600],
+      { gold: 12000, steel: 6000 }, { gold: 22000, steel: 11000 }, { gold: 35000, steel: 18000 }, { gold: 55000, steel: 28000 },
+      { gold: 80000, steel: 40000 }, { gold: 115000, steel: 58000 }, { gold: 160000, steel: 80000 }, { gold: 220000, steel: 110000 }],
+    timeTable: [0, 0, 30, 120, 300, 600, 1200, 1800, 3600, 5400, 7200, 9000, 10800],
     hp: { base: 1500, growth: 1.3 },
-    guard: { dmg: 5, fireRate: 3, range: 5, targets: 'both' }, // rooftop gun that defends in battle
+    guard: { dmg: 5, fireRate: 3, range: 6.2, targets: 'both' }, // rooftop gun that defends in battle
   },
   goldmine: {
     name: 'Gold Mine', code: 'GM', cat: 'economy', size: 2, max: MAX_LEVEL,
@@ -153,6 +162,54 @@ const DEFS = {
     hp: { base: 1000, growth: 1.25 },
     dmg: { base: 260, growth: 1.3 }, fireRate: 0.2, range: 13, minRange: 3, splash: 2.0, targets: 'ground',
   },
+  flak: {
+    name: 'Flak Cannon', code: 'FK', cat: 'defense', size: 2, max: MAX_LEVEL,
+    desc: 'Anti-aircraft gun. Shreds drones and gunships with bursting shells. Cannot hit ground units.',
+    cost: { base: { gold: 30000, steel: 22000 }, growth: 1.3 },
+    time: { base: 240, growth: 1.7 },
+    hp: { base: 1100, growth: 1.25 },
+    dmg: { base: 220, growth: 1.3 }, fireRate: 1.4, range: 8, splash: 1.1, targets: 'air',
+  },
+  railgun: {
+    name: 'Railgun', code: 'RG', cat: 'defense', size: 2, max: MAX_LEVEL,
+    desc: 'Fires a magnetic slug that pierces every enemy in a straight line.',
+    cost: { base: { gold: 45000, steel: 35000 }, growth: 1.28 },
+    time: { base: 300, growth: 1.7 },
+    hp: { base: 1200, growth: 1.25 },
+    dmg: { base: 900, growth: 1.3 }, fireRate: 0.35, range: 11, pierce: true, targets: 'ground',
+  },
+  rocketarty: {
+    name: 'Rocket Artillery', code: 'RA', cat: 'defense', size: 2, max: MAX_LEVEL,
+    desc: 'Launches a salvo of eight rockets that blanket a wide area.',
+    cost: { base: { gold: 65000, steel: 50000 }, growth: 1.25 },
+    time: { base: 360, growth: 1.7 },
+    hp: { base: 1300, growth: 1.25 },
+    dmg: { base: 260, growth: 1.3 }, fireRate: 0.18, range: 12, minRange: 3, splash: 1.2, salvo: 8, targets: 'ground',
+  },
+  laser: {
+    name: 'Laser Tower', code: 'LZ', cat: 'defense', size: 2, max: MAX_LEVEL,
+    desc: 'A continuous beam that burns hotter the longer it stays on one target. Hits ground and air.',
+    cost: { base: { gold: 90000, steel: 70000 }, growth: 1.22 },
+    time: { base: 420, growth: 1.7 },
+    hp: { base: 1500, growth: 1.25 },
+    dmg: { base: 22, growth: 1.3 }, fireRate: 10, range: 8, ramp: 4, targets: 'both',
+  },
+  mine: {
+    name: 'Land Mine', code: 'LM', cat: 'traps', size: 1, max: MAX_LEVEL, trap: true,
+    desc: 'Hidden explosive. Blows up under the first ground unit that steps near it. Re-arms after each battle.',
+    cost: { base: { gold: 150, steel: 100 }, growth: 1.7 },
+    time: { base: 0, growth: 1 },
+    hp: { base: 1, growth: 1 },
+    dmg: { base: 160, growth: 1.35 }, fireRate: 0, range: 0.6, splash: 1.3, targets: 'ground',
+  },
+  wire: {
+    name: 'Barbed Wire', code: 'BW', cat: 'traps', size: 1, max: MAX_LEVEL, trap: true,
+    desc: 'Enemies can cross it, but infantry slows to a crawl and gets cut while doing it.',
+    cost: { base: { steel: 80 }, growth: 1.7 },
+    time: { base: 0, growth: 1 },
+    hp: { base: 1, growth: 1 },
+    dmg: { base: 6, growth: 1.3 }, fireRate: 0, range: 0, slow: 0.4, targets: 'ground',
+  },
   wall: {
     name: 'Wall', code: 'WL', cat: 'walls', size: 1, max: MAX_LEVEL,
     desc: 'Blocks the enemy path. Place several in a row; they link together.',
@@ -162,7 +219,8 @@ const DEFS = {
   },
 };
 
-const WALL_NAMES = ['', 'Sandbag Wall', 'Concrete Wall', 'Reinforced Wall', 'Steel Wall', 'Fortress Wall', 'Bastion Wall', 'Titan Wall', 'Citadel Wall'];
+const WALL_NAMES = ['', 'Sandbag Wall', 'Concrete Wall', 'Reinforced Wall', 'Steel Wall', 'Fortress Wall', 'Bastion Wall', 'Titan Wall', 'Citadel Wall',
+  'Bulwark Wall', 'Aegis Wall', 'Colossus Wall', 'Monolith Wall'];
 
 function grow(spec, L) {
   return spec.base * Math.pow(spec.growth, L - 1);
@@ -180,7 +238,7 @@ function timeFor(type, L) {
   const d = DEFS[type];
   if (d.timeTable) return d.timeTable[L];
   if (!d.time.base) return 0;
-  return Math.round(grow(d.time, L));
+  return Math.min(MAX_BUILD_TIME, Math.round(grow(d.time, L)));
 }
 
 function statsFor(type, L) {
@@ -190,7 +248,7 @@ function statsFor(type, L) {
   if (d.storage) s.storage = Math.round(grow(d.storage, L) / 100) * 100;
   if (d.dmg) {
     s.dmg = Math.round(grow(d.dmg, L));
-    s.dps = Math.round(s.dmg * d.fireRate * (d.splash ? 1.5 : 1));
+    s.dps = d.trap ? s.dmg : Math.round(s.dmg * d.fireRate * (d.splash ? 1.5 : 1) * (d.salvo || 1));
     s.range = d.range;
   }
   if (type === 'hq') s.storage = HQ_STORAGE[L];
@@ -201,6 +259,11 @@ function unlockLevel(type) {
   const row = LIMITS[type];
   for (let i = 1; i < row.length; i++) if (row[i] > 0) return i;
   return 99;
+}
+
+// Traps a given HQ level unlocks (listed alongside the defense in the roadmap).
+function trapsUnlockedAt(L) {
+  return Object.keys(LIMITS).filter(t => DEFS[t].cat === 'traps' && LIMITS[t][L] > 0 && LIMITS[t][L - 1] === 0);
 }
 
 // The defense a given HQ level unlocks (for the roadmap and upgrade preview).
@@ -231,7 +294,7 @@ const ENEMIES = {
   drone:     { name: 'Attack Drone', hp: 110, speed: 1.5,  dmg: 12, rate: 1.0,  range: 1.4, bounty: 12, r: 9, air: true },
   medic:     { name: 'Field Medic',  hp: 70,  speed: 1.0,  dmg: 2,  rate: 1.0,  range: 1.8, bounty: 8,  r: 6, heal: 14, healRange: 2.2 },
   moto:      { name: 'Scout Bike',   hp: 45,  speed: 2.6,  dmg: 4,  rate: 2.0,  range: 1.6, bounty: 5,  r: 8, vehicle: true },
-  sapper:    { name: 'Sapper',       hp: 80,  speed: 1.3,  dmg: 260, rate: 1.0, range: 0.8, splash: 1.2, bounty: 9, r: 6, sapper: true },
+  sapper:    { name: 'Sapper',       hp: 80,  speed: 1.3,  dmg: 160, rate: 1.0, range: 0.8, splash: 1.2, bounty: 9, r: 6, sapper: true },
   apc:       { name: 'Troop Carrier', hp: 520, speed: 1.0, dmg: 6,  rate: 2.0,  range: 2.6, bounty: 25, r: 13, vehicle: true, carries: { type: 'rifleman', count: 4 } },
   flamer:    { name: 'Flame Trooper', hp: 120, speed: 0.9, dmg: 7,  rate: 5.0,  range: 1.6, bounty: 10, r: 7, flamer: true },
   heavy:     { name: 'Heavy Gunner', hp: 260, speed: 0.6,  dmg: 6,  rate: 4.0,  range: 2.6, bounty: 18, r: 9, armor: 8 },
@@ -344,9 +407,73 @@ const MISSIONS = [
   { id: 'wave10',   text: 'Survive wave 10',                        progress: s => [s.bestWave, 10], reward: { medals: 20 } },
   { id: 'hq5',      text: 'Upgrade the Command Center to level 5',  progress: s => [builtAt(s, 'hq', 5), 1], reward: { medals: 20 } },
   { id: 'tesla',    text: 'Build a Tesla Coil',                     progress: s => [builtAt(s, 'tesla', 1), 1], reward: { medals: 20 } },
-  { id: 'hq8',      text: 'Max out the Command Center (level 8)',   progress: s => [builtAt(s, 'hq', 8), 1], reward: { medals: 50 } },
+  { id: 'mine',     text: 'Lay 4 Land Mines',                       progress: s => [builtAt(s, 'mine', 1), 4], reward: { steel: 400 } },
+  { id: 'camp3',    text: 'Complete campaign mission 3',            progress: s => [Object.keys((s.campaign || {}).stars || {}).length, 3], reward: { medals: 10 } },
+  { id: 'camp12',   text: 'Finish the whole campaign',              progress: s => [Object.keys((s.campaign || {}).stars || {}).length, 12], reward: { medals: 60 } },
+  { id: 'hq8',      text: 'Command Center level 8',   progress: s => [builtAt(s, 'hq', 8), 1], reward: { medals: 50 } },
+  { id: 'hq12',     text: 'Command Center level 12',                progress: s => [builtAt(s, 'hq', 12), 1], reward: { medals: 80 } },
 ];
 
 // Supply drops: a crate lands in the base on a timer.
 const DROP_INTERVAL = 2 * 60 * 60 * 1000;
 const FIRST_DROP_DELAY = 90 * 1000;
+
+/* ---------------- Campaign: Operation Iron Line ---------------- */
+// Each mission is a fixed set of waves fought at your own base.
+// level sets enemy toughness (like the endless wave number); mods change the rules.
+const W = (...pairs) => { const out = []; for (let i = 0; i < pairs.length; i += 2) out.push({ type: pairs[i], count: pairs[i + 1] }); return out; };
+const CAMPAIGN = [
+  { id: 'm1', name: 'First Contact', hq: 1, level: 1, gates: ['w'],
+    brief: 'Scouts have found our outpost. Hold off a light probe from the west road.',
+    waves: [W('rifleman', 6), W('rifleman', 8, 'moto', 2), W('rifleman', 10, 'moto', 3)],
+    reward: { gold: 400, steel: 250, medals: 3 } },
+  { id: 'm2', name: 'Supply Line', hq: 2, level: 2, gates: ['w', 'e'],
+    brief: 'Raiders hit our convoys from both sides. Grenadiers and armored cars expected.',
+    waves: [W('rifleman', 10, 'grenadier', 2), W('rifleman', 10, 'jeep', 2, 'moto', 3), W('rifleman', 12, 'grenadier', 4, 'jeep', 3)],
+    reward: { gold: 800, steel: 500, medals: 4 } },
+  { id: 'm3', name: 'Bridgehead', hq: 2, level: 2, gates: ['w', 'e'],
+    brief: 'Engineers with demolition charges are trying to blast a way in. Keep them off your walls.',
+    waves: [W('rifleman', 8, 'sapper', 2), W('rifleman', 10, 'sapper', 3, 'grenadier', 2), W('sapper', 4, 'jeep', 2, 'rifleman', 8), W('rifleman', 12, 'sapper', 5, 'jeep', 3)],
+    reward: { gold: 1200, steel: 800, medals: 5 } },
+  { id: 'm4', name: 'Iron Rain', hq: 3, level: 3, gates: ['w', 'e'],
+    brief: 'The first enemy tanks have arrived. Cannons and walls will be your best friends.',
+    waves: [W('jeep', 3, 'rifleman', 10), W('tank', 1, 'jeep', 3, 'rifleman', 10), W('tank', 1, 'grenadier', 4, 'rifleman', 12), W('tank', 2, 'jeep', 4, 'rifleman', 12)],
+    reward: { gold: 2000, steel: 1300, medals: 6 } },
+  { id: 'm5', name: 'Field Hospital', hq: 3, level: 5, gates: ['w', 'e', 'n'],
+    brief: 'Medics are keeping the enemy column alive. Burst them down before they patch everyone up.',
+    waves: [W('rifleman', 14, 'medic', 3), W('rifleman', 14, 'grenadier', 5, 'medic', 4), W('jeep', 4, 'rifleman', 14, 'medic', 5), W('tank', 2, 'rifleman', 16, 'medic', 6, 'grenadier', 5)],
+    reward: { gold: 3000, steel: 2000, medals: 7 } },
+  { id: 'm6', name: 'Siege of Sector 7', hq: 5, level: 5, gates: ['w', 'e', 'n'],
+    brief: 'A Siege Tank is leading the assault. Survive the escort, then bring the giant down.',
+    waves: [W('rifleman', 14, 'jeep', 3, 'sapper', 2), W('tank', 1, 'rifleman', 14, 'medic', 2), W('tank', 2, 'jeep', 4, 'grenadier', 5), W('siege', 1, 'tank', 1, 'rifleman', 14, 'medic', 2)],
+    reward: { gold: 4500, steel: 3000, medals: 10 } },
+  { id: 'm7', name: 'Night Raid', hq: 4, level: 7, gates: ['w', 'e', 'n'], mods: { fast: 1.3 },
+    brief: 'Under cover of darkness, fast units are rushing the base. Every enemy moves 30% faster.',
+    waves: [W('moto', 8, 'rifleman', 14), W('moto', 8, 'sapper', 6, 'flamer', 3), W('jeep', 6, 'flamer', 5, 'sapper', 6, 'moto', 6), W('moto', 10, 'jeep', 8, 'flamer', 6, 'sapper', 8)],
+    reward: { gold: 6000, steel: 4000, medals: 10 } },
+  { id: 'm8', name: 'Skyfall', hq: 5, level: 8, gates: ['w', 'e', 'n'],
+    brief: 'Air assault. Drones and gunships will ignore your walls. Anti-air defenses are essential.',
+    waves: [W('drone', 6, 'rifleman', 12), W('drone', 8, 'heli', 1, 'rifleman', 12), W('drone', 10, 'heli', 2, 'jeep', 4), W('heli', 4, 'drone', 12, 'rifleman', 16)],
+    reward: { gold: 9000, steel: 6000, medals: 12 } },
+  { id: 'm9', name: 'Steel Tide', hq: 5, level: 8, gates: ['w', 'e', 'n'],
+    brief: 'Troop carriers and heavy gunners are pushing an armored wedge into the base.',
+    waves: [W('apc', 2, 'heavy', 2, 'rifleman', 12), W('apc', 3, 'tank', 2, 'heavy', 3), W('tank', 3, 'heavy', 4, 'apc', 3, 'medic', 3), W('tank', 4, 'apc', 4, 'heavy', 6, 'grenadier', 6)],
+    reward: { gold: 13000, steel: 9000, medals: 14 } },
+  { id: 'm10', name: 'Long Guns', hq: 6, level: 11, gates: ['w', 'e', 'n'],
+    brief: 'Artillery trucks are shelling us from beyond the fence. Hunt them with long-range guns and airstrikes.',
+    waves: [W('artillery', 2, 'rifleman', 16, 'jeep', 4), W('artillery', 3, 'tank', 3, 'heavy', 4), W('artillery', 4, 'apc', 4, 'flamer', 6, 'medic', 4), W('artillery', 6, 'tank', 5, 'heli', 2, 'rifleman', 20)],
+    reward: { gold: 20000, steel: 14000, medals: 16 } },
+  { id: 'm11', name: 'Total War', hq: 7, level: 26, gates: ['w', 'e', 'n'],
+    brief: 'Every unit the enemy has, thrown at us at once. Six waves. No retreat.',
+    waves: [W('rifleman', 24, 'grenadier', 8, 'moto', 6), W('jeep', 8, 'sapper', 8, 'flamer', 6, 'medic', 5), W('tank', 5, 'apc', 5, 'heavy', 6, 'drone', 8),
+      W('heli', 4, 'drone', 10, 'artillery', 3, 'rifleman', 20), W('tank', 6, 'artillery', 4, 'heavy', 10, 'sapper', 10), W('siege', 1, 'tank', 6, 'heli', 4, 'apc', 6, 'rifleman', 24)],
+    reward: { gold: 32000, steel: 22000, medals: 20 } },
+  { id: 'm12', name: 'Last Stand', hq: 8, level: 34, gates: ['w', 'e', 'n'], mods: { armored: 1.25, noAirstrike: true },
+    brief: 'The final assault. No air support is available. Two Siege Tanks lead the last wave.',
+    waves: [W('rifleman', 26, 'heavy', 8, 'medic', 6), W('tank', 6, 'apc', 6, 'flamer', 8, 'sapper', 8), W('heli', 6, 'drone', 14, 'artillery', 4),
+      W('siege', 1, 'tank', 6, 'heavy', 10, 'medic', 6), W('artillery', 6, 'heli', 5, 'apc', 8, 'moto', 10), W('siege', 2, 'tank', 8, 'heli', 6, 'heavy', 12, 'rifleman', 30)],
+    reward: { gold: 50000, steel: 35000, medals: 40 } },
+];
+
+// Stars from how much of the Command Center survived a campaign mission.
+function campaignStars(hqFraction) { return hqFraction >= 0.7 ? 3 : hqFraction >= 0.35 ? 2 : 1; }

@@ -107,11 +107,12 @@ const Sound = (() => {
     lose:    () => { [392, 330, 262, 196].forEach((f, i) => tone(f, 0.25, 'triangle', 0.12, null, i * 0.18)); },
     plane:   () => noise(1.6, 'bandpass', 300, 0.25, 0.4),
     heal:    () => { tone(500, 0.3, 'sine', 0.1, 1000); },
+    laser:   () => { tone(1400, 0.12, 'sine', 0.03, 1100); },
     zap:     () => { noise(0.18, 'highpass', 3000, 0.25); tone(1800, 0.12, 'sawtooth', 0.05, 400); },
     medal:   () => { tone(1046, 0.1, 'triangle', 0.12); tone(1568, 0.25, 'triangle', 0.12, null, 0.1); },
   };
   // minimum ms between repeats so rapid fire doesn't stack into noise
-  const GAP = { mg: 70, rifle: 90, flame: 120, boom: 60, rocket: 80, collect: 60, mortar: 100, cannon: 60, zap: 90 };
+  const GAP = { mg: 70, rifle: 90, flame: 120, boom: 60, rocket: 80, collect: 60, mortar: 100, cannon: 60, zap: 90, laser: 220 };
 
   function play(name) {
     if (!enabled || !ac || !FX[name]) return;

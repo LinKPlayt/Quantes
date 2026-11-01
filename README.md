@@ -55,11 +55,24 @@ light flashes, muzzle flashes, camera shake, craters, tank tracks and wrecks lef
 burning buildings, big-hit damage numbers, drifting cloud shadows, birds over the base, warm lighting,
 a vignette that pulses red when the Command Center is in danger.
 
+## Update 5: more defenses and campaign mode
+
+**Command Center now goes to level 12**, still one new defense per level:
+9 **Flak Cannon** (anti-air bursts) · 10 **Railgun** (pierces every enemy in a line) ·
+11 **Rocket Artillery** (8-rocket salvos) · 12 **Laser Tower** (beam that heats up on one target).
+
+**Traps** (new shop tab): **Land Mine** (HQ 2, hidden, one blast per battle, re-arms after) and
+**Barbed Wire** (HQ 3, slows and cuts infantry; enemies can still walk through it).
+
+**Campaign: Operation Iron Line**: 12 scripted missions fought at your base, each with fixed waves,
+special rules (faster enemies, tougher armor, no airstrikes), boss fights, rewards and 3-star ratings.
+
 ## Code layout
 
 - `js/data.js` – building stats, costs, limits per HQ level, wave previews
 - `js/render.js` – procedural terrain and building art (canvas)
 - `js/audio.js` – synthesized sound effects and vibration
+- `js/campaign.js` – campaign missions: operation map, briefings, results and stars
 - `js/battle.js` – battle mode: waves, enemy pathing (flow field), turret fire, rewards
 - `js/game.js` – state, saving, placement, input, HUD and main loop
 - `style.css` – HUD, panels, shop and modals

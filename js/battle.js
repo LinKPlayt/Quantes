@@ -11,7 +11,9 @@ const GATES = {
 
 /* ---------------- Lifecycle ---------------- */
 
-function startBattle() {
+// mission: a CAMPAIGN entry, or null for the endless battle.
+function startBattle(mission) {
+  if (mission && !mission.waves) mission = null; // called straight from a click handler
   if (placing) cancelPlace();
   select(null);
   closeModal();
@@ -28,11 +30,14 @@ function startBattle() {
     units: [], shots: [], fx: [], kills: 0, waves: 0,
     loot: { gold: 0, steel: 0 }, medals: 0, speed: 1, flow: null, flowDirty: true, over: false,
     ab: { airstrike: 3, repair: 0 }, targeting: false, planes: [], dmgBy: {}, bosses: 0, decals: [],
+    mission: mission || null, mods: (mission && mission.mods) || {},
   };
   S.battles = (S.battles || 0) + 1;
   document.body.classList.add('in-battle');
   setSpeedLabel();
-  banner('Defend the base', 'First wave approaching from the west road');
+  if (B.mission) banner(B.mission.name, `${B.mission.waves.length} waves. Hold the Command Center`);
+  else banner('Defend the base', 'First wave approaching from the west road');
+  document.body.classList.toggle('no-airstrike', !!B.mods.noAirstrike);
   Sound.play('alarm');
 }
 
@@ -40,15 +45,23 @@ function startWave(n) {
   B.wave = n;
   B.phase = 'fight';
   const q = [];
-  for (const g of waveComposition(n)) for (let i = 0; i < g.count; i++) q.push(g.type);
+  const comp = B.mission ? B.mission.waves[n - 1] : waveComposition(n);
+  for (const g of comp) for (let i = 0; i < g.count; i++) q.push(g.type);
   // keep a few riflemen up front, shuffle the rest so heavy units arrive mixed in
   const head = q.splice(0, 3);
   for (let i = q.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [q[i], q[j]] = [q[j], q[i]]; }
   B.queue = head.concat(q);
-  B.gates = waveGates(n);
+  B.gates = B.mission ? B.mission.gates : waveGates(n);
   B.spawnT = 0.5;
   B.spawnIdx = 0;
   B.waveSize = B.queue.length;
+  if (B.mission) {
+    const boss = comp.some(g => ENEMIES[g.type].boss);
+    const last = n === B.mission.waves.length;
+    banner(`Wave ${n} of ${B.mission.waves.length}`, boss ? 'Siege Tank inbound' : last ? 'Final wave' : `${B.waveSize} hostiles inbound`);
+    Sound.play(boss ? 'boss' : 'alarm');
+    return;
+  }
   const fresh = n > 1 && waveGates(n).length > waveGates(n - 1).length;
   const fresh2 = waveComposition(n).filter(g => g.count > 0 && firstWaveOf(g.type) === n && !ENEMIES[g.type].boss).map(g => ENEMIES[g.type].name);
   if (fresh2.length && !isBossWave(n)) {
@@ -65,6 +78,7 @@ function startWave(n) {
 
 function endBattle(reason) {
   if (!B || B.over) return;
+  if (B.mission) { endMission(reason); return; }
   B.over = true;
   const survived = B.waves;
   const record = survived > (S.bestWave || 0);
@@ -116,9 +130,9 @@ function endBattle(reason) {
 // Called when the after-action report closes: repair the base and go back to building.
 function leaveBattle() {
   if (!B) return;
-  for (const b of S.buildings) { delete b._hp; delete b._maxhp; delete b._dead; delete b._cd; delete b._tgt; delete b._heal; b._flash = 0; }
+  for (const b of S.buildings) { delete b._hp; delete b._maxhp; delete b._dead; delete b._cd; delete b._tgt; delete b._heal; delete b._beamOn; b._flash = 0; }
   B = null;
-  document.body.classList.remove('in-battle', 'hq-danger', 'targeting');
+  document.body.classList.remove('in-battle', 'hq-danger', 'targeting', 'no-airstrike');
   $('#banner').hidden = true;
   rebuildGrid();
   save();
@@ -128,7 +142,7 @@ function leaveBattle() {
 
 function liveBuildingAtTile(tx, ty) {
   const b = buildingAtTile(tx, ty);
-  return b && !b._dead ? b : null;
+  return b && !b._dead && !DEFS[b.type].trap ? b : null;
 }
 
 // Cost of stepping onto a tile: buildings count as slow ground proportional to their hp,
@@ -214,6 +228,7 @@ function battleUpdate(dt) {
   B.units = B.units.filter(u => u.hp > 0);
 
   for (const b of S.buildings) if (!b._dead) updateDefense(b, dt);
+  for (const b of S.buildings) if (b.type === 'mine' && !b._dead && b.level >= 1) checkMine(b);
 
   for (const p of B.shots) updateShot(p, dt);
   B.shots = B.shots.filter(p => !p.done);
@@ -244,7 +259,7 @@ function spawnEnemy(type) {
   const gate = B.gates[B.spawnIdx++ % B.gates.length];
   const p = GATES[gate]();
   const e = ENEMIES[type];
-  const hp = enemyHp(type, B.wave);
+  const hp = Math.round(enemyHp(type, B.mission ? B.mission.level + B.wave - 1 : B.wave) * (B.mods.armored || 1));
   B.units.push({
     type, x: p.x + (Math.random() - 0.5) * 24, y: p.y + (Math.random() - 0.5) * 24,
     hp, max: hp, cd: Math.random(), angle: 0, aim: 0, walk: Math.random() * 6,
@@ -255,6 +270,15 @@ function spawnEnemy(type) {
 
 function waveCleared() {
   const n = B.wave;
+  if (B.mission) {
+    B.waves = n;
+    addXP(15 * n);
+    if (n >= B.mission.waves.length) { B.phase = 'won'; save(); setTimeout(() => endBattle('victory'), 900); banner('Mission complete', B.mission.name); Sound.play('win'); return; }
+    B.phase = 'break'; B.breakT = 6;
+    banner(`Wave ${n} cleared`, `${B.mission.waves.length - n} to go`);
+    Sound.play('medal'); save();
+    return;
+  }
   const r = waveReward(n);
   const got = { gold: addLoot('gold', r.gold), steel: addLoot('steel', r.steel) };
   B.waves = n;
@@ -290,7 +314,7 @@ function distToBuilding(x, y, b) {
 function nearestBuilding(x, y, range, skipWalls) {
   let best = null, bd = range;
   for (const b of S.buildings) {
-    if (b._dead || (skipWalls && b.type === 'wall')) continue;
+    if (b._dead || DEFS[b.type].trap || (skipWalls && b.type === 'wall')) continue;
     const d = distToBuilding(x, y, b);
     if (d <= bd) { bd = d; best = b; }
   }
@@ -299,6 +323,15 @@ function nearestBuilding(x, y, range, skipWalls) {
 
 function updateEnemy(u, dt) {
   const e = ENEMIES[u.type];
+  // barbed wire slows and cuts foot soldiers
+  u.slow = 1;
+  if (!u.air && !e.vehicle) {
+    const tile = buildingAtTile(Math.floor(u.x / TILE), Math.floor(u.y / TILE));
+    if (tile && tile.type === 'wire' && tile.level >= 1) {
+      u.slow = DEFS.wire.slow;
+      damageEnemy(u, statsFor('wire', tile.level).dmg * dt, 'wire');
+    }
+  }
   u.cd -= dt;
   u.retarget -= dt;
   if (u.tgt && u.tgt._dead) u.tgt = null;
@@ -342,7 +375,7 @@ function updateEnemy(u, dt) {
   u.moving = !!moveTo;
   if (moveTo) {
     const dx = moveTo.x - u.x, dy = moveTo.y - u.y, d = Math.hypot(dx, dy) || 1;
-    const step = Math.min(d, e.speed * TILE * dt);
+    const step = Math.min(d, e.speed * (B.mods.fast || 1) * u.slow * TILE * dt);
     u.x += (dx / d) * step; u.y += (dy / d) * step;
     u.angle = Math.atan2(dy, dx);
     u.aim = u.angle;
@@ -425,7 +458,7 @@ function sapperBlast(u, e) {
   u.hp = 0;
   damageBuilding(u.tgt, e.dmg);
   for (const b of S.buildings) {
-    if (b._dead || b === u.tgt) continue;
+    if (b._dead || b === u.tgt || DEFS[b.type].trap) continue;
     if (distToBuilding(u.x, u.y, b) <= e.splash) damageBuilding(b, e.dmg * 0.5);
   }
   explosion(u.x, u.y, 34);
@@ -462,7 +495,7 @@ function damageEnemy(u, dmg, src) {
     // troop carriers unload their passengers
     if (e.carries) {
       for (let i = 0; i < e.carries.count; i++) {
-        const t = e.carries.type, hp = enemyHp(t, B.wave);
+        const t = e.carries.type, hp = Math.round(enemyHp(t, B.mission ? B.mission.level + B.wave - 1 : B.wave) * (B.mods.armored || 1));
         const a = (i / e.carries.count) * Math.PI * 2;
         B.units.push({ type: t, x: u.x + Math.cos(a) * 12, y: u.y + Math.sin(a) * 12, hp, max: hp, cd: 0.5 + Math.random(), angle: a, aim: a, walk: 0,
           ox: (Math.random() - 0.5) * 16, oy: (Math.random() - 0.5) * 16, tgt: null, retarget: 0, air: false, moving: true });
@@ -529,7 +562,7 @@ function weaponOf(b) {
   if (b.level < 1) return null;
   const d = DEFS[b.type];
   if (d.guard) return { dmg: d.guard.dmg * b.level, fireRate: d.guard.fireRate, range: d.guard.range, targets: d.guard.targets };
-  if (!d.dmg) return null;
+  if (!d.dmg || d.trap) return null;
   return { dmg: statsFor(b.type, b.level).dmg, fireRate: d.fireRate, range: d.range, minRange: d.minRange || 0, splash: d.splash || 0, targets: d.targets };
 }
 
@@ -541,7 +574,7 @@ function updateDefense(b, dt) {
   const c = centerOf(b);
   const inRange = u => {
     if (u.hp <= 0) return false;
-    if (u.air && w.targets !== 'both') return false;
+    if (w.targets === 'air' ? !u.air : (u.air && w.targets !== 'both')) return false;
     const d = Math.hypot(u.x - c.x, u.y - c.y) / TILE;
     return d <= w.range && d >= (w.minRange || 0);
   };
@@ -565,7 +598,7 @@ function updateDefense(b, dt) {
   if (b._cd > 0) return;
   b._cd = 1 / w.fireRate;
   b._flash = 0.06;
-  if (b.type !== 'flame' && b.type !== 'tesla') {
+  if (b.type !== 'flame' && b.type !== 'tesla' && b.type !== 'laser') {
     const lc = centerOf(b);
     B.fx.push({ kind: 'light', x: lc.x + Math.cos(Math.atan2(b._tgt.y - lc.y, b._tgt.x - lc.x)) * 22, y: lc.y - 8 + Math.sin(Math.atan2(b._tgt.y - lc.y, b._tgt.x - lc.x)) * 22, r: b.type === 'mg' || b.type === 'hq' ? 16 : 30, life: 0.07, max: 0.07 });
   }
@@ -596,6 +629,41 @@ function updateDefense(b, dt) {
         B.shots.push({ kind: 'rocket', x: mx, y: my, tx: t.x, ty: t.y, target: t, speed: 8 * TILE, dmg: w.dmg, splash: w.splash, air: true, wobble: off, age: 0, src: 'missile' });
       }
       break;
+    case 'flak': {
+      Sound.play('cannon');
+      B.shots.push({ kind: 'flak', x: mx, y: my - 10, tx: t.x + (Math.random() - 0.5) * 12, ty: t.y - 18, target: null, speed: 16 * TILE, dmg: w.dmg, splash: w.splash, airOnly: true, src: 'flak' });
+      break;
+    }
+    case 'railgun': {
+      Sound.play('sniper'); Sound.play('zap'); addShake(2);
+      const len = w.range * TILE;
+      const ex = c.x + Math.cos(want) * len, ey = c.y + Math.sin(want) * len;
+      for (const u of B.units) {
+        if (u.hp <= 0 || u.air) continue;
+        if (segDist(u.x, u.y, c.x, c.y, ex, ey) < 16) damageEnemy(u, w.dmg, 'railgun');
+      }
+      B.fx.push({ kind: 'rail', x1: mx, y1: my, x2: ex, y2: ey, life: 0.3, max: 0.3 });
+      break;
+    }
+    case 'rocketarty': {
+      Sound.play('rocket'); buzz(20);
+      for (let i = 0; i < (DEFS.rocketarty.salvo || 8); i++) {
+        const a = Math.random() * Math.PI * 2, r = Math.random() * 1.6 * TILE;
+        B.shots.push({ kind: 'mortar', rocket: true, x: c.x, y: c.y - 10, sx: c.x + (Math.random() - 0.5) * 20, sy: c.y - 10, tx: t.x + Math.cos(a) * r, ty: t.y + Math.sin(a) * r,
+          t: -i * 0.12, dur: 1.3, arc: 160, dmg: w.dmg, splash: w.splash, air: false, src: 'rocketarty' });
+      }
+      break;
+    }
+    case 'laser': {
+      // damage ramps up while the beam stays on the same target
+      if (b._beamOn !== t) { b._beamOn = t; b._beamT = 0; }
+      b._beamT += 1 / w.fireRate;
+      const ramp = 1 + Math.min(1, b._beamT / 3) * ((DEFS.laser.ramp || 4) - 1);
+      damageEnemy(t, w.dmg * ramp, 'laser');
+      Sound.play('laser');
+      B.fx.push({ kind: 'beam', x1: c.x, y1: c.y - 46, x2: t.x, y2: t.y - (t.air ? 18 : 3), life: 0.12, max: 0.12, heat: ramp / (DEFS.laser.ramp || 4) });
+      break;
+    }
     case 'tesla': {
       // lightning jumps to the nearest enemy not yet hit, losing a little power each jump
       Sound.play('zap');
@@ -636,10 +704,31 @@ function updateDefense(b, dt) {
   }
 }
 
+function checkMine(b) {
+  const c = centerOf(b);
+  for (const u of B.units) {
+    if (u.air || u.hp <= 0) continue;
+    if (Math.hypot(u.x - c.x, u.y - c.y) <= DEFS.mine.range * TILE) {
+      b._dead = true;
+      splashDamage(c.x, c.y, DEFS.mine.splash, statsFor('mine', b.level).dmg, false, 'mine');
+      explosion(c.x, c.y, 26);
+      Sound.play('bigboom'); buzz(30);
+      return;
+    }
+  }
+}
+
+function segDist(px, py, x1, y1, x2, y2) {
+  const dx = x2 - x1, dy = y2 - y1, l2 = dx * dx + dy * dy || 1;
+  const k = Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / l2));
+  return Math.hypot(px - (x1 + dx * k), py - (y1 + dy * k));
+}
+
 function updateShot(p, dt) {
   if (p.dur) {
-    // time-based arcing / lobbed shot
+    // time-based arcing / lobbed shot (a negative t means it has not launched yet)
     p.t += dt;
+    if (p.t < 0) return;
     const k = Math.min(1, p.t / p.dur);
     p.x = p.sx + (p.tx - p.sx) * k;
     p.y = p.sy + (p.ty - p.sy) * k;
@@ -656,6 +745,20 @@ function updateShot(p, dt) {
         explosion(p.tx, p.ty, p.splash * TILE * 0.9);
       }
     }
+    return;
+  }
+  if (p.kind === 'flak') {
+    const dx = p.tx - p.x, dy = p.ty - p.y, d = Math.hypot(dx, dy), step = p.speed * dt;
+    if (d <= step + 2) {
+      p.done = true;
+      const r = p.splash * TILE;
+      for (const u of B.units) if (u.air && u.hp > 0 && Math.hypot(u.x - p.tx, u.y - 18 - p.ty) <= r) damageEnemy(u, p.dmg, 'flak');
+      B.fx.push({ kind: 'light', x: p.tx, y: p.ty, r: 30, life: 0.15, max: 0.15 });
+      for (let i = 0; i < 6; i++) particles.push({ x: p.tx + (Math.random() - 0.5) * 16, y: p.ty + (Math.random() - 0.5) * 16, vx: (Math.random() - 0.5) * 20, vy: -6, g: 0, life: 1.2, max: 1.2, r: 4, grow: 6, color: 'smoke-dark' });
+      Sound.play('boom');
+      return;
+    }
+    p.x += dx / d * step; p.y += dy / d * step;
     return;
   }
   // homing projectile
@@ -687,10 +790,14 @@ function splashDamage(x, y, radiusTiles, dmg, hitsAir, src) {
 
 /* ---------------- Abilities ---------------- */
 
-function abilityReady(k) { return B && !B.over && B.phase !== 'lost' && B.ab[k] <= 0; }
+function abilityReady(k) {
+  if (k === 'airstrike' && B && B.mods.noAirstrike) return false;
+  return B && !B.over && B.phase !== 'lost' && B.ab[k] <= 0;
+}
 
 function armAirstrike() {
   if (!B) return;
+  if (B.mods.noAirstrike) { toast('No air support in this mission', 'bad'); Sound.play('error'); return; }
   if (!abilityReady('airstrike')) { Sound.play('error'); return; }
   B.targeting = !B.targeting;
   document.body.classList.toggle('targeting', B.targeting);
@@ -737,7 +844,7 @@ function useRepair() {
   B.ab.repair = ABILITIES.repair.cooldown;
   let n = 0;
   for (const b of S.buildings) {
-    if (b._dead || b._hp >= b._maxhp) continue;
+    if (b._dead || DEFS[b.type].trap || b._hp >= b._maxhp) continue;
     b._hp = Math.min(b._maxhp, b._hp + b._maxhp * ABILITIES.repair.heal);
     b._heal = 1.2; n++;
   }
@@ -781,6 +888,24 @@ function drawBattleAir(ctx) {
       ctx.setLineDash([8, 6]);
       ctx.beginPath(); ctx.arc(f.x, f.y, f.r * (0.6 + k * 0.4), 0, Math.PI * 2); ctx.stroke();
       ctx.setLineDash([]);
+    } else if (f.kind === 'rail') {
+      const k = f.life / f.max;
+      ctx.lineCap = 'round';
+      for (const [wid, col] of [[10 * k, `rgba(90,170,255,${0.35 * k})`], [3 * k + 1, `rgba(220,240,255,${k})`]]) {
+        ctx.strokeStyle = col; ctx.lineWidth = wid;
+        ctx.beginPath(); ctx.moveTo(f.x1, f.y1); ctx.lineTo(f.x2, f.y2); ctx.stroke();
+      }
+      ctx.lineCap = 'butt';
+    } else if (f.kind === 'beam') {
+      const hot = f.heat || 0;
+      ctx.lineCap = 'round';
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.strokeStyle = `rgba(255,${120 - hot * 80},${60 - hot * 40},0.4)`; ctx.lineWidth = 6 + hot * 6;
+      ctx.beginPath(); ctx.moveTo(f.x1, f.y1); ctx.lineTo(f.x2, f.y2); ctx.stroke();
+      ctx.strokeStyle = '#fff1e0'; ctx.lineWidth = 1.5 + hot * 1.5;
+      ctx.beginPath(); ctx.moveTo(f.x1, f.y1); ctx.lineTo(f.x2, f.y2); ctx.stroke();
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.lineCap = 'butt';
     } else if (f.kind === 'shock') {
       const k = 1 - f.life / f.max;
       ctx.strokeStyle = `rgba(255,240,200,${(1 - k) * 0.5})`; ctx.lineWidth = 3 * (1 - k) + 1;
@@ -803,7 +928,7 @@ function drawBattleAir(ctx) {
   for (const pl of B.planes) drawJet(ctx, pl.x, pl.y, pl.a);
   // building health bars
   for (const b of S.buildings) {
-    if (b._dead || b._hp >= b._maxhp || b.type === 'wall' && b._hp > b._maxhp * 0.98) continue;
+    if (b._dead || DEFS[b.type].trap || b._hp >= b._maxhp || b.type === 'wall' && b._hp > b._maxhp * 0.98) continue;
     const n = DEFS[b.type].size * TILE;
     const w = Math.max(26, n * 0.7);
     const x = b.x * TILE + n / 2 - w / 2, y = b.y * TILE - (b.type === 'wall' ? 6 : 18);
@@ -1041,6 +1166,15 @@ function drawEnemyBar(ctx, u, e) {
 }
 
 function drawShot(ctx, p) {
+  if (p.dur && p.t < 0) return;
+  if (p.kind === 'flak') { ctx.fillStyle = '#ffe08a'; ctx.beginPath(); ctx.arc(p.x, p.y, 2, 0, Math.PI * 2); ctx.fill(); return; }
+  if (p.rocket) {
+    const h = p.h || 0;
+    ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.beginPath(); ctx.ellipse(p.x, p.y, 3, 1.5, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#ff9a3a'; ctx.beginPath(); ctx.arc(p.x, p.y - h, 3, 0, Math.PI * 2); ctx.fill();
+    if (Math.random() < 0.6) particles.push({ x: p.x, y: p.y - h, vx: 0, vy: -4, g: 0, life: 0.5, max: 0.5, r: 2, grow: 5, color: 'smoke' });
+    return;
+  }
   if (p.kind === 'bomb') {
     const k = Math.min(1, p.t / p.dur);
     ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.beginPath(); ctx.ellipse(p.tx, p.ty, 3 + k * 5, 2 + k * 3, 0, 0, Math.PI * 2); ctx.fill();
@@ -1077,7 +1211,7 @@ function banner(title, sub) {
 
 function updateBattleHUD() {
   if (!B) return;
-  setText($('#bh-wave'), 'bw', String(Math.max(1, B.wave)));
+  setText($('#bh-wave'), 'bw', B.mission ? `${Math.max(1, B.wave)}/${B.mission.waves.length}` : String(Math.max(1, B.wave)));
   const left = B.queue.length + B.units.length;
   const status = B.phase === 'break'
     ? (B.wave === 0 ? `Enemy arrives in ${Math.ceil(B.breakT)}` : `Next wave in ${Math.ceil(B.breakT)}`)

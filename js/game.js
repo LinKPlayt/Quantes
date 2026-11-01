@@ -39,6 +39,7 @@ function migrate(s) {
   s.settings = Object.assign({ sound: true, haptics: true }, s.settings || {});
   if (s.nextDrop == null) s.nextDrop = Date.now() + FIRST_DROP_DELAY;
   if (s.bestWave == null) s.bestWave = 0;
+  if (!s.campaign) s.campaign = { stars: {} };
   return s;
 }
 
@@ -232,7 +233,7 @@ function openRoadmap() {
         <div class="road-lvl">${L}</div>
         <div class="road-art" data-type="${d || ''}"></div>
         <div class="road-body">
-          <div class="road-title">${d ? DEFS[d].name : 'Command Center'}</div>
+          <div class="road-title">${d ? DEFS[d].name : 'Command Center'}${trapsUnlockedAt(L).map(t => ` <span class="road-plus">+ ${DEFS[t].name}</span>`).join('')}</div>
           <div class="road-meta">Level cap ${L} · storage ${fmt(HQ_STORAGE[L])}${L > 1 ? ` · ${fmtTime(timeFor('hq', L))}` : ''}</div>
         </div>
         <div class="road-cost">${state === 'done' || state === 'now' ? `<span class="road-tag">${state === 'now' ? 'Current' : 'Done'}</span>` : costHTML(c)}</div>
@@ -387,14 +388,14 @@ function confirmPlace() {
   const c = centerOf(b);
   burst(c.x, c.y, '#c9b27a', 10);
   save();
-  if (type === 'wall') {
+  if (DEFS[type].size === 1) {
     // keep laying wall: try the next tile along the last direction
     const dir = placing.dir || { x: 1, y: 0 };
-    const next = buildStatus('wall');
+    const next = buildStatus(type);
     if (next.ok) {
       placing.x += dir.x; placing.y += dir.y;
-      if (!footprintFree('wall', placing.x, placing.y, 0)) {
-        const alt = nearestFree('wall', placing.x, placing.y);
+      if (!footprintFree(type, placing.x, placing.y, 0)) {
+        const alt = nearestFree(type, placing.x, placing.y);
         if (alt) { placing.x = alt.x; placing.y = alt.y; }
       }
       placing.prev = { x: b.x, y: b.y };
@@ -405,7 +406,7 @@ function confirmPlace() {
   }
   placing = null;
   showPlaceCtrl(false);
-  select(type === 'wall' ? null : b.id);
+  select(DEFS[type].size === 1 ? null : b.id);
 }
 
 function cancelPlace() {
@@ -697,7 +698,7 @@ function draw() {
       const link = o => o && o.type === 'wall' && o.level >= 1 && !o._dead && !(placing && placing.moveId === o.id);
       nb = { r: link(r), d: link(d) };
     }
-    if (b._dead) { drawRubble(ctx, b); continue; }
+    if (b._dead) { if (!DEFS[b.type].trap) drawRubble(ctx, b); continue; }
     drawBuilding(ctx, b, tSec, nb);
     if (b.job && !B) {
       drawScaffold(ctx, b, tSec);
@@ -781,7 +782,7 @@ function drawSelection(b) {
   for (const [px, py, sx, sy] of [[x - 3, y - 3, 1, 1], [x + n + 3, y - 3, -1, 1], [x - 3, y + n + 3, 1, -1], [x + n + 3, y + n + 3, -1, -1]]) {
     ctx.beginPath(); ctx.moveTo(px, py + sy * k); ctx.lineTo(px, py); ctx.lineTo(px + sx * k, py); ctx.stroke();
   }
-  if (b.level >= 1 && b.type !== 'wall') levelChevrons(ctx, x + n - 6, y + n - 14 - b.level * 2, b.level);
+  if (b.level >= 1 && DEFS[b.type].size > 1) levelChevrons(ctx, x + n - 6, y + n - 14 - b.level * 2, b.level);
 }
 
 function drawGhost() {
@@ -929,7 +930,10 @@ function statChips(b) {
     if (nd && !b.job) out.push(`<span class="chip unlock-chip"><b>NEXT</b>${DEFS[nd].name}</span>`);
     out.push(chip('STORAGE', fmt(cur.storage), nxt && fmt(nxt.storage)));
   }
-  if (d.dmg) {
+  if (d.trap) {
+    out.push(chip(b.type === 'wire' ? 'CUT /S' : 'BLAST', cur.dmg, nxt && nxt.dmg));
+    out.push(`<span class="chip"><b>EFFECT</b>${b.type === 'wire' ? 'Slows infantry 60%' : 'One use per battle'}</span>`);
+  } else if (d.dmg) {
     out.push(chip('DPS', cur.dps, nxt && nxt.dps));
     out.push(chip('RANGE', d.range, null));
     out.push(chip('HITS', d.targets === 'both' ? 'Ground + Air' : 'Ground', null));
@@ -990,8 +994,8 @@ function buildPanel(b, up) {
         : `<span class="btn-sub reason">${up.cost && up.reason === 'Not enough resources' ? costHTML(up.cost) : up.reason}</span>`;
       actions += `<button class="btn upgrade ${up.ok ? '' : 'off'}" data-act="upgrade"><span class="btn-main">Upgrade</span>${sub}</button>`;
     }
-    if (b.type === 'wall' && !up.max) {
-      const same = S.buildings.filter(w => w.type === 'wall' && w.level === b.level && !w.job).length;
+    if (DEFS[b.type].size === 1 && !up.max) {
+      const same = S.buildings.filter(w => w.type === b.type && w.level === b.level && !w.job).length;
       if (same > 1) actions += `<button class="btn ghost" data-act="walls-all"><span class="btn-main">All ${same}</span><span class="btn-sub">to level ${b.level + 1}</span></button>`;
     }
     actions += `<button class="btn ghost" data-act="move">Move</button>`;
@@ -1029,7 +1033,7 @@ panel.addEventListener('click', e => {
   else if (act === 'cancel') cancelJob(b);
   else if (act === 'finish') finishNow(b);
   else if (act === 'roadmap') { openRoadmap(); return; }
-  else if (act === 'walls-all') upgradeAllWalls(b.level);
+  else if (act === 'walls-all') upgradeAllOf(b.type, b.level);
   else if (act === 'sell') { sellArmed = true; }
   else if (act === 'sell-confirm') { sell(b); return; }
   else if (act === 'close') { select(null); return; }
@@ -1142,7 +1146,7 @@ function defenseRating() {
   let dps = 0, walls = 0, towers = 0;
   for (const b of S.buildings) {
     if (b.level < 1) continue;
-    if (DEFS[b.type].dmg) { dps += statsFor(b.type, b.level).dps; towers++; }
+    if (DEFS[b.type].dmg && !DEFS[b.type].trap) { dps += statsFor(b.type, b.level).dps; towers++; }
     if (b.type === 'wall') walls++;
   }
   return { dps, walls, towers };
@@ -1239,17 +1243,18 @@ function applySettings() {
   hapticsOn = S.settings.haptics;
 }
 
-/* ----- Walls: upgrade a whole set ----- */
-function upgradeAllWalls(level) {
-  const list = S.buildings.filter(w => w.type === 'wall' && w.level === level && !w.job);
+/* ----- Walls and traps: upgrade a whole set ----- */
+function upgradeAllOf(type, level) {
+  const list = S.buildings.filter(w => w.type === type && w.level === level && !w.job);
   const to = level + 1;
-  if (to > levelCap('wall', hqLevel())) { toast(`Walls above level ${level} need Command Center level ${to}`, 'bad'); Sound.play('error'); return; }
-  const cost = costFor('wall', to);
+  if (to > levelCap(type, hqLevel())) { toast(`Level ${to} needs Command Center level ${to}`, 'bad'); Sound.play('error'); return; }
+  const cost = costFor(type, to);
   let n = 0;
   for (const w of list) { if (!canAfford(cost)) break; pay(cost); w.level = to; n++; }
   if (!n) { toast('Not enough resources', 'bad'); Sound.play('error'); return; }
   Sound.play('done');
-  toast(`${n} wall${n > 1 ? 's' : ''} upgraded to ${WALL_NAMES[to]}${n < list.length ? ` (${list.length - n} left: not enough resources)` : ''}`, 'good');
+  const label = type === 'wall' ? `wall${n > 1 ? 's' : ''} upgraded to ${WALL_NAMES[to]}` : `${DEFS[type].name}${n > 1 ? 's' : ''} upgraded to level ${to}`;
+  toast(`${n} ${label}${n < list.length ? ` (${list.length - n} left: not enough resources)` : ''}`, 'good');
   save();
 }
 
@@ -1427,6 +1432,7 @@ function start(hotData) {
   $('#builders').addEventListener('click', () => { if (!B) { Sound.play('click'); openBuilders(); } });
   $('#hq-badge').addEventListener('click', () => { if (!B) openRename(); });
   $('#btn-collect').addEventListener('click', collectAll);
+  $('#btn-campaign').addEventListener('click', () => { Sound.play('click'); openCampaign(); });
   resize();
   recenter();
   ground = buildGroundCanvas(1.5);

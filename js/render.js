@@ -262,7 +262,7 @@ DRAW.hq = function (ctx, b, t) {
   ctx.save(); rr(ctx, x + 6, y + S - 14, S - 12, 7, 2); ctx.clip();
   for (let i = -2; i < 20; i++) { ctx.fillStyle = i % 2 ? PAL.hazard : PAL.black; ctx.beginPath(); ctx.moveTo(x + i * 10, y + S - 14); ctx.lineTo(x + i * 10 + 10, y + S - 14); ctx.lineTo(x + i * 10 + 3, y + S); ctx.lineTo(x + i * 10 - 7, y + S); ctx.fill(); }
   ctx.restore();
-  const roof = [null, PAL.olive, '#62703d', '#556347', '#4b5a52', '#3f4c55', '#45503c', '#3c4634', '#33392b'][L];
+  const roof = [null, PAL.olive, '#62703d', '#556347', '#4b5a52', '#3f4c55', '#45503c', '#3c4634', '#33392b'][Math.min(L, 8)];
   const h = 18 + L * 3;
   box(ctx, x + 14, y + 22, S - 28, S - 46, h, roof, shade(roof, -0.35), 6);
   // roof details
@@ -346,7 +346,7 @@ DRAW.goldmine = function (ctx, b, t) {
 DRAW.steelworks = function (ctx, b, t) {
   const S = 2 * TILE, x = b.x * TILE, y = b.y * TILE, L = Math.max(1, b.level);
   pad(ctx, x, y, S, PAL.concreteDark, 3);
-  const body = [null, '#6c747a', '#68737d', '#5f6d7a', '#566679', '#4c5e75', '#45576f', '#3f5069', '#394963'][L];
+  const body = [null, '#6c747a', '#68737d', '#5f6d7a', '#566679', '#4c5e75', '#45576f', '#3f5069', '#394963'][Math.min(L, 8)];
   box(ctx, x + 8, y + 26, 50, 42, 20, shade(body, 0.12), shade(body, -0.35), 3);
   // corrugated roof lines
   ctx.strokeStyle = 'rgba(0,0,0,0.18)'; ctx.lineWidth = 1;
@@ -430,7 +430,7 @@ DRAW.mg = function (ctx, b, t) {
 
 DRAW.cannon = function (ctx, b, t) {
   const L = Math.max(1, b.level);
-  const col = [null, '#8b8b7d', '#858c8f', '#7a8794', '#6f8298', '#617895', '#57708f', '#4e6888', '#455f80'][L];
+  const col = [null, '#8b8b7d', '#858c8f', '#7a8794', '#6f8298', '#617895', '#57708f', '#4e6888', '#455f80'][Math.min(L, 8)];
   const S = 2 * TILE, x = b.x * TILE, y = b.y * TILE;
   // octagon concrete pad
   const pcx = x + S / 2, pcy = y + S / 2 + 2;
@@ -608,10 +608,119 @@ DRAW.howitzer = function (ctx, b, t) {
   ctx.restore();
 };
 
+DRAW.flak = function (ctx, b, t) {
+  const S = 2 * TILE, x = b.x * TILE, y = b.y * TILE, L = Math.max(1, b.level);
+  pad(ctx, x, y, S, '#5c6152', 3);
+  sandbagRing(ctx, x + S / 2, y + S / 2 + 2, 30, 18, L >= 10 ? PAL.concrete : PAL.sandDark);
+  const { cx, cy } = turretBase(ctx, b, '#5d6b4a', 7);
+  ctx.save(); ctx.translate(cx, cy); ctx.rotate(b.angle);
+  const recoil = b._flash > 0 ? -4 : 0;
+  ctx.fillStyle = PAL.shadow; ctx.fillRect(6, -6, 34, 14);
+  for (const oy of [-6, 6]) { ctx.fillStyle = '#23251e'; rr(ctx, 4 + recoil, oy - 2.2, 32, 4.4, 2); ctx.fill(); ctx.fillStyle = '#121310'; ctx.fillRect(33 + recoil, oy - 3, 4, 6); }
+  ctx.fillStyle = '#4b5639'; rr(ctx, -13, -13, 24, 26, 5); ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.12)'; rr(ctx, -11, -11, 20, 9, 4); ctx.fill();
+  ctx.fillStyle = '#9fd0e8'; ctx.beginPath(); ctx.arc(-4, 0, 3, 0, Math.PI * 2); ctx.fill();
+  if (b._flash > 0) { ctx.fillStyle = '#ffd36b'; ctx.beginPath(); ctx.arc(40, -6, 5, 0, Math.PI * 2); ctx.arc(40, 6, 5, 0, Math.PI * 2); ctx.fill(); }
+  ctx.restore();
+};
+
+DRAW.railgun = function (ctx, b, t) {
+  const S = 2 * TILE, x = b.x * TILE, y = b.y * TILE, L = Math.max(1, b.level);
+  pad(ctx, x, y, S, '#3f454d', 2);
+  ctx.strokeStyle = 'rgba(90,170,255,0.35)'; ctx.lineWidth = 2;
+  rr(ctx, x + 6, y + 6, S - 12, S - 12, 6); ctx.stroke();
+  const { cx, cy } = turretBase(ctx, b, '#56616d', 9);
+  ctx.save(); ctx.translate(cx, cy); ctx.rotate(b.angle);
+  ctx.fillStyle = PAL.shadow; ctx.fillRect(6, -2, 46, 12);
+  // twin rails with glowing coils between them
+  ctx.fillStyle = '#2a2f36'; rr(ctx, 2, -8, 46, 4, 2); ctx.fill(); rr(ctx, 2, 4, 46, 4, 2); ctx.fill();
+  const glow = 0.4 + Math.sin(t * 6 + b.id) * 0.25 + (b._flash > 0 ? 0.6 : 0);
+  for (let i = 0; i < 5; i++) { ctx.fillStyle = `rgba(110,190,255,${Math.min(1, glow)})`; ctx.fillRect(10 + i * 8, -3, 3, 6); }
+  ctx.fillStyle = '#3d4652'; rr(ctx, -14, -12, 22, 24, 5); ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.14)'; rr(ctx, -12, -10, 18, 8, 3); ctx.fill();
+  ctx.fillStyle = '#6ec0ff'; ctx.beginPath(); ctx.arc(-4, 4, 2.5, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+  void L;
+};
+
+DRAW.rocketarty = function (ctx, b, t) {
+  const S = 2 * TILE, x = b.x * TILE, y = b.y * TILE, L = Math.max(1, b.level);
+  pad(ctx, x, y, S, PAL.concreteDark, 2);
+  // truck chassis
+  box(ctx, x + 8, y + 50, 64, 20, 6, '#55613f', '#3a4329', 3);
+  for (const wx of [16, 34, 52, 64]) { ctx.fillStyle = '#16120f'; rr(ctx, x + wx - 4, y + 66, 8, 5, 2); ctx.fill(); }
+  box(ctx, x + 56, y + 40, 16, 12, 10, '#606d47', '#3f4a2d', 2);
+  ctx.fillStyle = 'rgba(160,210,230,0.6)'; ctx.fillRect(x + 66, y + 30, 5, 6);
+  // rocket pod, tilted to its aim
+  const cx = x + S / 2 - 6, cy = y + 36;
+  ctx.save(); ctx.translate(cx, cy); ctx.rotate(b.angle);
+  ctx.fillStyle = PAL.shadow; rr(ctx, -12, -8, 40, 22, 3); ctx.fill();
+  ctx.fillStyle = L >= 10 ? '#5a6672' : '#4e5a36'; rr(ctx, -14, -12, 38, 24, 3); ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.1)'; rr(ctx, -12, -10, 34, 7, 2); ctx.fill();
+  for (let r = 0; r < 2; r++) for (let c = 0; c < 4; c++) {
+    ctx.fillStyle = '#16120f'; ctx.beginPath(); ctx.arc(22, -7.5 + c * 5, 2.2, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = PAL.red; ctx.beginPath(); ctx.arc(22, -7.5 + c * 5, 1, 0, Math.PI * 2); ctx.fill();
+    void r;
+  }
+  if (b._flash > 0) { ctx.fillStyle = 'rgba(255,200,110,0.8)'; ctx.beginPath(); ctx.arc(-18, 0, 10, 0, Math.PI * 2); ctx.fill(); }
+  ctx.restore();
+};
+
+DRAW.laser = function (ctx, b, t) {
+  const S = 2 * TILE, x = b.x * TILE, y = b.y * TILE, L = Math.max(1, b.level);
+  const cx = x + S / 2, cy = y + S / 2;
+  pad(ctx, x, y, S, '#3c4048', 3);
+  // tower body
+  ctx.fillStyle = PAL.shadow; ctx.beginPath(); ctx.moveTo(cx - 14, cy + 18); ctx.lineTo(cx + 16, cy + 18); ctx.lineTo(cx + 46, cy + 4); ctx.lineTo(cx + 16, cy + 4); ctx.fill();
+  ctx.fillStyle = '#2b2f36'; ctx.beginPath(); ctx.moveTo(cx - 16, cy + 18); ctx.lineTo(cx + 16, cy + 18); ctx.lineTo(cx + 9, cy - 34); ctx.lineTo(cx - 9, cy - 34); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#3d434d'; ctx.beginPath(); ctx.moveTo(cx - 16, cy + 18); ctx.lineTo(cx, cy + 18); ctx.lineTo(cx, cy - 34); ctx.lineTo(cx - 9, cy - 34); ctx.closePath(); ctx.fill();
+  for (let i = 0; i < 3; i++) { ctx.fillStyle = 'rgba(255,90,60,0.6)'; ctx.fillRect(cx - 8 + i * 0.5, cy + 6 - i * 14, 16 - i, 2); }
+  // emitter head
+  const hy = cy - 40;
+  ctx.fillStyle = '#4a515c'; ctx.beginPath(); ctx.arc(cx, hy, 11, 0, Math.PI * 2); ctx.fill();
+  const glow = 0.5 + Math.sin(t * 5 + b.id) * 0.3;
+  const g = ctx.createRadialGradient(cx, hy, 0, cx, hy, 9);
+  g.addColorStop(0, `rgba(255,240,220,${glow + 0.3})`); g.addColorStop(1, 'rgba(255,60,40,0)');
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx, hy, 9, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#ff5a3c'; ctx.beginPath(); ctx.arc(cx, hy, 3.5, 0, Math.PI * 2); ctx.fill();
+  void L;
+};
+
+DRAW.mine = function (ctx, b, t) {
+  const x = b.x * TILE + TILE / 2, y = b.y * TILE + TILE / 2, L = Math.max(1, b.level);
+  // in battle the mine is buried: only a faint outline shows
+  ctx.globalAlpha *= (typeof B !== 'undefined' && B) ? 0.35 : 1;
+  ctx.fillStyle = 'rgba(70,55,35,0.6)'; ctx.beginPath(); ctx.ellipse(x, y + 2, 11, 7, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = L >= 6 ? '#5a6068' : '#4f5a35'; ctx.beginPath(); ctx.arc(x, y, 8, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.15)'; ctx.beginPath(); ctx.arc(x - 2, y - 2, 4, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#2a2e22';
+  for (let i = 0; i < 4; i++) { const a = i * Math.PI / 2 + 0.6; ctx.fillRect(x + Math.cos(a) * 5 - 1, y + Math.sin(a) * 5 - 1, 2, 2); }
+  ctx.fillStyle = Math.sin(t * 4 + b.id) > 0.6 ? '#ff4a2a' : '#5a1a10'; ctx.beginPath(); ctx.arc(x, y, 1.6, 0, Math.PI * 2); ctx.fill();
+  if (typeof B !== 'undefined' && B) ctx.globalAlpha /= 0.35;
+};
+
+DRAW.wire = function (ctx, b, t) {
+  const x = b.x * TILE, y = b.y * TILE, L = Math.max(1, b.level);
+  // wooden X-frame posts and coils of razor wire
+  ctx.strokeStyle = '#4a3a28'; ctx.lineWidth = 2.5;
+  for (const px of [x + 6, x + TILE - 6]) { ctx.beginPath(); ctx.moveTo(px - 4, y + 10); ctx.lineTo(px + 4, y + TILE - 8); ctx.moveTo(px + 4, y + 10); ctx.lineTo(px - 4, y + TILE - 8); ctx.stroke(); }
+  ctx.strokeStyle = L >= 6 ? '#c9d2da' : '#a9a99a'; ctx.lineWidth = 1.1;
+  for (let row = 0; row < 2; row++) {
+    const yy = y + 15 + row * 10;
+    ctx.beginPath();
+    for (let i = 0; i <= 16; i++) {
+      const a = i * 1.2, px = x + 4 + i * ((TILE - 8) / 16);
+      const py = yy + Math.sin(a) * 4;
+      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    }
+    ctx.stroke();
+  }
+};
+
 DRAW.wall = function (ctx, b, t, neighbors) {
   const x = b.x * TILE, y = b.y * TILE, L = Math.max(1, b.level);
   const h = 8 + L * 2;
-  const top = [null, PAL.sand, '#a7a597', '#8f8f84', '#7f8c97', '#5c6670', '#4d5560', '#40464f', '#33373d'][L];
+  const top = [null, PAL.sand, '#a7a597', '#8f8f84', '#7f8c97', '#5c6670', '#4d5560', '#40464f', '#33373d'][Math.min(L, 8)];
   const side = shade(top, -0.4);
   const inset = 8;
   const n = neighbors || {};
