@@ -124,10 +124,19 @@ The first major update, 22 features built on research into Clash of Clans, Boom 
 **Meta and polish:** daily orders · monthly events with tokens and an exclusive shop · Wardrobe (HQ skins, flags, troop camo) · generative music with volume sliders · colorblind mode, large text and a left-handed layout.
 Most new screens live under the Operations button in the top bar.
 
+## Update 2.1: Graphics overhaul
+
+**World:** new terrain with noise-textured ground, a river with sandy banks and shimmering water, roads with ruts and puddles, mown grass stripes, flowers and pebbles · trees and bushes that sway in the wind · winter, desert and jungle themes get their own trees, palms and snow.
+**Lighting:** a live day and night cycle that follows your clock (dawn, day, dusk, night) · fence lamps, lit windows, HQ floodlights and searchlight beams · every muzzle flash, fire and explosion lights up the ground around it · bloom glow on fire, tracers and lasers · cinematic color grading and film grain.
+**Combat effects:** fireball explosions with smoke, flying debris and sparks · muzzle flashes and ejected shell casings · glowing tracers · soldiers fall and fade, destroyed vehicles keep burning and smoking · rain with splashes, drifting fog banks and falling snow.
+**Buildings and feel:** 3D buildings with sunlit edges and shaded walls · soft contact shadows · a hologram preview when placing buildings · camera keeps gliding after a flick · glass-style HUD, glossy buttons and a splash screen.
+**Settings:** Menu → Graphics (Ultra, High or Low) and Day & night (Live or Off). On slower phones the game steps down from Ultra by itself until you pick a level.
+
 ## Code layout
 
 - `js/data.js` – building stats, costs, limits per HQ level, wave previews
-- `js/render.js` – procedural terrain and building art (canvas)
+- `js/render.js` – building art and 3D box shading (canvas)
+- `js/gfx.js` – graphics engine: terrain, water, foliage, lighting, bloom, weather, particles and explosions
 - `js/audio.js` – synthesized sound effects and vibration
 - `js/army.js` – Barracks training, troop deployment, troop AI, rally and reinforcements
 - `js/arsenal.js` – abilities, loadout and their battle effects

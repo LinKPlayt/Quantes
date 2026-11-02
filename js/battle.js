@@ -34,7 +34,7 @@ function startBattle(mission) {
     sentries: [], hero: null, firstWaveEarly: 0,
     troops: [], deployed: {}, smokes: [], reinforceCd: 0, deployPick: null, rallyMode: false, lost: 0,
     streak: 0, streakT: 0, bestStreak: 0, battleStars: 0,
-    bonus: freshBonus(), cards: [], paused: false, overdrive: 0, heroDrones: [],
+    bonus: freshBonus(), cards: [], paused: false, overdrive: 0, heroDrones: [], corpses: [], fires: [],
     practice: !!(mission && mission.practice), faction: !mission ? currentFaction() : null,
   };
   // threat level (endless only), weather and time of day
@@ -239,6 +239,7 @@ function battleUpdate(dt) {
   if (B.streakT > 0) { B.streakT -= dt; if (B.streakT <= 0) B.streak = 0; }
   if (B.raid) updateRaid(dt);
   updateTroops(dt);
+  updateBattleFX(dt);
   updateSmokes(dt);
 
   if (B.phase === 'break') {
@@ -589,9 +590,11 @@ function damageEnemy(u, dmg, src) {
     if (e.vehicle || e.air) {
       explosion(u.x, u.y, e.r * 1.6);
       addDecal({ kind: 'wreck', x: u.x, y: u.y, r: e.r, a: u.angle, life: 40 });
+      if (!e.air && B.fires.length < 16) B.fires.push({ x: u.x, y: u.y, life: 6 + Math.random() * 3, r: e.r });
     } else {
       for (let i = 0; i < 5; i++) particles.push({ x: u.x, y: u.y, vx: (Math.random() - 0.5) * 60, vy: -30 - Math.random() * 40, g: 160, life: 0.4, max: 0.4, r: 2, color: '#6b2a1c' });
       addDecal({ kind: 'helmet', x: u.x, y: u.y, r: 3, life: 18 });
+      if (gfxQuality() !== 'low' && B.corpses.length < 40) B.corpses.push({ type: u.type, x: u.x, y: u.y, aim: u.aim, walk: u.walk, life: 2.6, max: 2.6, dir: Math.random() < 0.5 ? -1 : 1 });
     }
     // troop carriers unload their passengers
     if (e.carries) {
@@ -641,6 +644,7 @@ function drawBattleDecals(ctx) {
 
 function explosion(x, y, size) {
   if (size > 20) Sound.play('boom');
+  gfxExplosion(x, y, size);
   B.fx.push({ kind: 'boom', x, y, r: size, life: 0.45, max: 0.45 });
   B.fx.push({ kind: 'shock', x, y, r: size * 2.2, life: 0.35, max: 0.35 });
   B.fx.push({ kind: 'light', x, y, r: size * 3, life: 0.25, max: 0.25 });
@@ -723,7 +727,11 @@ function updateDefense(b, dt) {
   b._cd = 1 / w.fireRate;
   b._flash = 0.06;
   if (b.type !== 'flame' && b.type !== 'tesla' && b.type !== 'laser') {
-    const lc = centerOf(b);
+    const lc = centerOf(b), ang = Math.atan2(b._tgt.y - lc.y, b._tgt.x - lc.x);
+    const big = !(b.type === 'mg' || b.type === 'hq' || b.type === 'watchtower');
+    const reach = b.type === 'howitzer' ? 54 : b.type === 'cannon' ? 40 : b.type === 'hq' ? 0 : 26;
+    B.fx.push({ kind: 'mflash', x: lc.x + Math.cos(ang) * reach, y: lc.y - (b.type === 'hq' ? 40 : 8) + Math.sin(ang) * reach, a: ang, r: big ? 16 : 8, life: big ? 0.09 : 0.05, max: big ? 0.09 : 0.05 });
+    if (!big && gfxQuality() !== 'low' && Math.random() < 0.6) particles.push({ kind: 'casing', x: lc.x, y: lc.y - 6, vx: Math.cos(ang + 1.7) * (40 + Math.random() * 40), vy: -70 - Math.random() * 40, g: 420, floor: lc.y + 10 + Math.random() * 8, life: 0.9, max: 0.9, r: 1.5, rot: Math.random() * 6, vr: 20 });
     B.fx.push({ kind: 'light', x: lc.x + Math.cos(Math.atan2(b._tgt.y - lc.y, b._tgt.x - lc.x)) * 22, y: lc.y - 8 + Math.sin(Math.atan2(b._tgt.y - lc.y, b._tgt.x - lc.x)) * 22, r: b.type === 'mg' || b.type === 'hq' ? 16 : 30, life: 0.07, max: 0.07 });
   }
   const mx = c.x + Math.cos(want) * 20, my = c.y - 8 + Math.sin(want) * 20;
@@ -979,6 +987,7 @@ function battleTap(w) {
 function drawBattleGround(ctx) {
   if (!B) return;
   drawSmokes(ctx);
+  drawCorpses(ctx);
   for (const u of B.units) if (!u.air) drawEnemy(ctx, u);
   drawTroops(ctx);
   drawHero(ctx);
@@ -990,9 +999,33 @@ function drawBattleAir(ctx) {
   for (const p of B.shots) drawShot(ctx, p);
   for (const f of B.fx) {
     if (f.kind === 'tracer') {
-      ctx.strokeStyle = f.color; ctx.lineWidth = f.width || 1.5; ctx.globalAlpha = 0.9;
+      // glowing tracer: a soft halo under a bright core, fading toward the shooter
+      const k = Math.max(0, f.life / (f.max || 0.07));
+      ctx.lineCap = 'round';
+      ctx.globalCompositeOperation = 'lighter';
+      const gr = ctx.createLinearGradient(f.x1, f.y1, f.x2, f.y2);
+      gr.addColorStop(0, 'rgba(255,220,140,0)'); gr.addColorStop(1, f.color);
+      ctx.strokeStyle = gr; ctx.globalAlpha = 0.35 * (0.5 + k); ctx.lineWidth = (f.width || 1.5) * 3.5;
       ctx.beginPath(); ctx.moveTo(f.x1, f.y1); ctx.lineTo(f.x2, f.y2); ctx.stroke();
-      ctx.globalAlpha = 1;
+      ctx.globalAlpha = 0.95; ctx.lineWidth = f.width || 1.5; ctx.strokeStyle = gr;
+      ctx.beginPath(); ctx.moveTo(f.x1, f.y1); ctx.lineTo(f.x2, f.y2); ctx.stroke();
+      ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1; ctx.lineCap = 'butt';
+    } else if (f.kind === 'fireball') {
+      const k = 1 - f.life / f.max, r = f.r * (0.45 + k * 0.9);
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = Math.max(0, 1 - k * 1.1);
+      ctx.drawImage(GFX.sprites.fireball, f.x - r, f.y - r * 1.05, r * 2, r * 2);
+      ctx.globalAlpha = Math.max(0, 0.8 - k);
+      const r2 = r * 0.55; ctx.drawImage(GFX.sprites.fireball, f.x - r2, f.y - r2 - k * 14, r2 * 2, r2 * 2);
+      ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+    } else if (f.kind === 'mflash') {
+      const k = f.life / f.max;
+      ctx.save(); ctx.translate(f.x, f.y); ctx.rotate(f.a);
+      ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = k;
+      ctx.drawImage(glowSprite('#ffcf6a'), -f.r * 1.2, -f.r * 1.2, f.r * 2.4, f.r * 2.4);
+      ctx.fillStyle = '#fff6d0'; ctx.beginPath();
+      ctx.moveTo(f.r * 1.8, 0); ctx.lineTo(f.r * 0.3, f.r * 0.35); ctx.lineTo(0, f.r * 0.9); ctx.lineTo(-f.r * 0.2, 0); ctx.lineTo(0, -f.r * 0.9); ctx.lineTo(f.r * 0.3, -f.r * 0.35); ctx.closePath(); ctx.fill();
+      ctx.restore(); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
     } else if (f.kind === 'bolt') {
       const rnd = mulberry(Math.floor(f.seed + f.life * 60));
       const n = 6;
@@ -1042,6 +1075,11 @@ function drawBattleAir(ctx) {
       g.addColorStop(0, `rgba(255,200,110,${0.55 * k})`); g.addColorStop(1, 'rgba(255,140,40,0)');
       ctx.fillStyle = g; ctx.beginPath(); ctx.arc(f.x, f.y, f.r, 0, Math.PI * 2); ctx.fill();
       ctx.globalCompositeOperation = 'source-over';
+    } else if (f.kind === 'boom' && gfxQuality() !== 'low') {
+      const k = 1 - f.life / f.max;
+      ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = Math.max(0, 0.9 - k * 2);
+      ctx.drawImage(glowSprite('#fff2c0'), f.x - f.r, f.y - f.r, f.r * 2, f.r * 2);
+      ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
     } else if (f.kind === 'boom') {
       const k = 1 - f.life / f.max;
       ctx.globalAlpha = 1 - k;
@@ -1556,4 +1594,31 @@ function drawSkyFortress(ctx, u, e, white) {
   }
   ctx.restore();
   if (u.flash > 0) { ctx.fillStyle = '#ffd36b'; ctx.beginPath(); ctx.arc(0, 12, 6, 0, Math.PI * 2); ctx.fill(); }
+}
+
+/* ----- Battlefield dressing: falling soldiers and burning wrecks ----- */
+function updateBattleFX(dt) {
+  for (const c of B.corpses) c.life -= dt;
+  B.corpses = B.corpses.filter(c => c.life > 0);
+  const q = gfxQuality();
+  for (const f of B.fires) {
+    f.life -= dt;
+    if (q === 'low') continue;
+    if (Math.random() < dt * 14) particles.push({ x: f.x + (Math.random() - 0.5) * f.r, y: f.y - 4, vx: (Math.random() - 0.5) * 10, vy: -40 - Math.random() * 30, g: 0, life: 0.5, max: 0.5, r: 3 + Math.random() * 3, grow: 6, color: Math.random() < 0.5 ? '#ff9a3a' : '#ffcf5a', glow: true });
+    if (Math.random() < dt * 5) particles.push({ x: f.x + (Math.random() - 0.5) * f.r, y: f.y - 10, vx: 8 + Math.random() * 6, vy: -24 - Math.random() * 10, g: 0, life: 2.6, max: 2.6, r: 5, grow: 9, color: 'smoke-dark', rot: Math.random() * 6, vr: 0.6 });
+  }
+  B.fires = B.fires.filter(f => f.life > 0);
+}
+
+function drawCorpses(ctx) {
+  for (const c of B.corpses) {
+    const e = ENEMIES[c.type];
+    const fall = Math.min(1, (c.max - c.life) / 0.35);
+    ctx.save(); ctx.translate(c.x, c.y);
+    ctx.globalAlpha = Math.min(1, c.life / 0.8);
+    ctx.rotate(fall * 1.35 * c.dir); ctx.scale(1, 1 - fall * 0.25);
+    drawInfantry(ctx, { type: c.type, aim: c.aim, walk: c.walk, moving: false, flash: 0 }, e, false);
+    ctx.restore();
+  }
+  ctx.globalAlpha = 1;
 }

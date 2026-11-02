@@ -488,6 +488,7 @@ let gesture = null;
 
 canvas.addEventListener('pointerdown', e => {
   canvas.setPointerCapture(e.pointerId);
+  camVel.x = camVel.y = 0;
   pointers.set(e.pointerId, { x: e.offsetX, y: e.offsetY });
   if (pointers.size === 1) {
     const w = screenToWorld(e.offsetX, e.offsetY);
@@ -523,7 +524,10 @@ canvas.addEventListener('pointermove', e => {
     const dx = e.offsetX - gesture.sx, dy = e.offsetY - gesture.sy;
     if (!gesture.moved && Math.hypot(dx, dy) > 8) gesture.moved = true;
     if (gesture.moved) {
-      cam.x = gesture.cx - dx / cam.z; cam.y = gesture.cy - dy / cam.z;
+      const nx = gesture.cx - dx / cam.z, ny = gesture.cy - dy / cam.z, now = performance.now();
+      if (gesture.lt) { const dtm = Math.max(1, now - gesture.lt) / 1000; gesture.vx = (nx - cam.x) / dtm; gesture.vy = (ny - cam.y) / dtm; }
+      gesture.lt = now;
+      cam.x = nx; cam.y = ny;
       clampCam();
     }
   } else if (gesture.mode === 'drag' && placing) {
@@ -543,6 +547,10 @@ canvas.addEventListener('pointermove', e => {
 function endPointer(e) {
   if (!pointers.has(e.pointerId)) return;
   pointers.delete(e.pointerId);
+  // keep gliding after a flick
+  if (gesture && gesture.mode === 'pan' && gesture.moved && pointers.size === 0 && performance.now() - (gesture.lt || 0) < 80 && gfxQuality() !== 'low') {
+    camVel.x = clamp(gesture.vx || 0, -3000, 3000); camVel.y = clamp(gesture.vy || 0, -3000, 3000);
+  }
   if (editMode && placing && placing.moveId && gesture && gesture.mode === 'drag' && pointers.size === 0) {
     if (placing.valid) confirmPlace(); else { cancelPlace(); toast('That spot is blocked', 'bad'); }
     select(null); gesture = null; return;
@@ -655,7 +663,8 @@ function update(dt) {
     }
   }
   if (B) battleUpdate(dt * B.speed);
-  for (const p of particles) { p.life -= dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vy += p.g * dt; if (p.grow) p.r += p.grow * dt; }
+  for (const p of particles) updateParticle(p, dt);
+  if (particles.length > 900) particles.splice(0, particles.length - 900);
   particles = particles.filter(p => p.life > 0);
   for (const f of floaters) { f.life -= dt; f.y -= 30 * dt; }
   floaters = floaters.filter(f => f.life > 0);
@@ -727,15 +736,17 @@ function draw() {
   const sh = shakeOffset(frameDt);
   ctx.setTransform(dpr * z, 0, 0, dpr * z, dpr * (vw / 2 - cam.x * z + sh.x), dpr * (vh / 2 - cam.y * z + sh.y));
   if (ground) ctx.drawImage(ground, 0, 0, MAP_W * TILE, MAP_H * TILE);
+  drawWater(ctx);
   drawBattleDecals(ctx);
   for (const o of (S.obstacles || [])) drawObstacle(ctx, o, tSec);
 
+  const list = S.buildings.filter(b => !(placing && placing.moveId === b.id));
+  if (gfxQuality() !== 'low') drawContactShadows(ctx, list);
   if (placing) drawGridOverlay();
 
   const sel = selectedId ? byId(selectedId) : null;
   if (sel && !placing) drawSelection(sel);
 
-  const list = S.buildings.filter(b => !(placing && placing.moveId === b.id));
   list.sort((a, b) => (a.y + DEFS[a.type].size) - (b.y + DEFS[b.type].size) || a.x - b.x);
   for (const b of list) {
     let nb = null;
@@ -755,9 +766,9 @@ function draw() {
   }
 
   drawBattleGround(ctx);
+  drawFoliage(ctx);
   if (placing) drawGhost();
 
-  // collection bubbles
   for (const b of S.buildings) {
     if (!b.spec || b._dead || (placing && placing.moveId === b.id)) continue;
     const bx = b.x * TILE + 8, by = (b.y + DEFS[b.type].size) * TILE - 8;
@@ -767,6 +778,17 @@ function draw() {
     ctx.fill();
   }
   if (S.drop && !B) drawSupplyCrate(ctx, (S.drop.x + 0.5) * TILE, (S.drop.y + 0.5) * TILE, tSec);
+
+  if (!S.settings.lowfx) drawCloudShadows();
+  drawParticlesFX(ctx);
+  if (!S.settings.lowfx) drawBirds();
+  drawBattleAir(ctx);
+
+  // post-processing: lighting, bloom, colour grade, weather
+  drawPostFX();
+
+  // unlit overlays stay readable at night
+  ctx.setTransform(dpr * z, 0, 0, dpr * z, dpr * (vw / 2 - cam.x * z + sh.x), dpr * (vh / 2 - cam.y * z + sh.y));
   if (!placing && !B) for (const b of S.buildings) {
     if (!hasBubble(b)) continue;
     const p = bubblePos(b);
@@ -776,20 +798,6 @@ function draw() {
     ctx.strokeStyle = '#2b2e25'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(p.x, p.y, 15, 0, Math.PI * 2); ctx.stroke();
     drawCoinIcon(ctx, p.x, p.y, 8, DEFS[b.type].produces);
   }
-
-  if (!S.settings.lowfx) drawCloudShadows();
-  for (const p of particles) {
-    const a = clamp(p.life / p.max, 0, 1);
-    const smoke = p.color === 'smoke' || p.color === 'smoke-dark';
-    ctx.globalAlpha = smoke ? a * 0.45 : a;
-    if (p.glow) ctx.globalCompositeOperation = 'lighter';
-    ctx.fillStyle = p.color === 'smoke' ? '#cfcabb' : p.color === 'smoke-dark' ? '#3a3632' : p.color;
-    ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.fill();
-    if (p.glow) ctx.globalCompositeOperation = 'source-over';
-  }
-  ctx.globalAlpha = 1;
-  if (!S.settings.lowfx) drawBirds();
-  drawBattleAir(ctx);
   for (const f of floaters) {
     ctx.globalAlpha = clamp(f.life / f.max * 1.5, 0, 1);
     ctx.font = `${f.size || 22}px "Black Ops One", Impact, sans-serif`;
@@ -798,48 +806,9 @@ function draw() {
     ctx.fillStyle = f.color; ctx.fillText(f.text, f.x, f.y);
   }
   ctx.globalAlpha = 1;
-  drawAtmosphere();
 }
 
-// Battle weather and time of day, painted over the world in screen space.
 const rainDrops = [];
-function drawAtmosphere() {
-  if (!B) return;
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  const dark = B.daytime ? B.daytime.dark : 0;
-  if (dark > 0) {
-    ctx.fillStyle = `rgba(8,14,30,${dark})`; ctx.fillRect(0, 0, vw, vh);
-    // muzzle flashes and explosions light up the dark
-    ctx.setTransform(dpr * cam.z, 0, 0, dpr * cam.z, dpr * (vw / 2 - cam.x * cam.z), dpr * (vh / 2 - cam.y * cam.z));
-    ctx.globalCompositeOperation = 'lighter';
-    for (const f of B.fx) {
-      if (f.kind !== 'light' && f.kind !== 'boom') continue;
-      const k = f.life / f.max, r = (f.kind === 'boom' ? f.r * 3 : f.r) * 1.2;
-      const g = ctx.createRadialGradient(f.x, f.y, 0, f.x, f.y, r);
-      g.addColorStop(0, `rgba(255,190,110,${0.5 * k * dark * 1.6})`); g.addColorStop(1, 'rgba(255,140,40,0)');
-      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(f.x, f.y, r, 0, Math.PI * 2); ctx.fill();
-    }
-    ctx.globalCompositeOperation = 'source-over';
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  }
-  if (B.weather.id === 'fog') {
-    const g = ctx.createRadialGradient(vw / 2, vh / 2, Math.min(vw, vh) * 0.2, vw / 2, vh / 2, Math.max(vw, vh) * 0.7);
-    g.addColorStop(0, 'rgba(220,225,215,0.12)'); g.addColorStop(1, 'rgba(220,225,215,0.5)');
-    ctx.fillStyle = g; ctx.fillRect(0, 0, vw, vh);
-  } else if (B.weather.id === 'rain' && !S.settings.lowfx) {
-    while (rainDrops.length < 90) rainDrops.push({ x: Math.random() * vw, y: Math.random() * vh, s: 500 + Math.random() * 300 });
-    ctx.strokeStyle = 'rgba(200,215,230,0.35)'; ctx.lineWidth = 1;
-    ctx.beginPath();
-    for (const r of rainDrops) {
-      r.y += r.s * frameDt; r.x -= r.s * 0.2 * frameDt;
-      if (r.y > vh) { r.y = -10; r.x = Math.random() * (vw + 60); }
-      ctx.moveTo(r.x, r.y); ctx.lineTo(r.x - 3, r.y + 12);
-    }
-    ctx.stroke();
-    ctx.fillStyle = 'rgba(40,55,70,0.12)'; ctx.fillRect(0, 0, vw, vh);
-  }
-  if (B.empFlash > 0) { ctx.fillStyle = `rgba(150,210,255,${B.empFlash})`; ctx.fillRect(0, 0, vw, vh); }
-}
 
 function drawGridOverlay() {
   ctx.save();
@@ -884,10 +853,9 @@ function drawSelection(b) {
 function drawGhost() {
   const n = DEFS[placing.type].size;
   const x = placing.x * TILE, y = placing.y * TILE, S2 = n * TILE;
-  ctx.fillStyle = placing.valid ? 'rgba(127,191,77,0.35)' : 'rgba(200,64,42,0.4)';
+  ctx.fillStyle = placing.valid ? 'rgba(127,191,77,0.28)' : 'rgba(200,64,42,0.34)';
   ctx.fillRect(x, y, S2, S2);
-  ctx.strokeStyle = placing.valid ? '#a5e26e' : '#ff6a4d'; ctx.lineWidth = 2;
-  ctx.strokeRect(x + 1, y + 1, S2 - 2, S2 - 2);
+  drawHologram(ctx, x, y, S2, S2, placing.valid);
   const d = DEFS[placing.type];
   if (d.range) {
     drawRange(x + S2 / 2, y + S2 / 2, d.range * TILE, 'rgba(242,182,50,A)', true);
@@ -914,8 +882,12 @@ function frame(now) {
   try {
     update(dt);
     updateAmbient(dt);
+    updateCameraGlide(dt);
+    BOX_FANCY = gfxQuality() !== 'low';
     frameDt = dt;
+    const d0 = performance.now();
     draw();
+    perfSample(performance.now() - d0, dt);
     updateHUD();
     updateBattleHUD();
     Music.setMode(B ? 'battle' : 'base');
@@ -1363,7 +1335,8 @@ $('#btn-menu').addEventListener('click', () => {
         <button class="btn ghost" id="btn-recenter">Recenter view</button>
         <button class="btn ghost" id="btn-record">Service record</button>
         <button class="btn ghost" id="btn-backup">Backup</button>
-        <button class="btn ghost toggle ${S.settings.lowfx ? 'on' : ''}" id="btn-lowfx">Battery saver: ${S.settings.lowfx ? 'On' : 'Off'}</button>
+        <button class="btn ghost toggle on" id="btn-gfx">Graphics: ${gfxLabel()}</button>
+        <button class="btn ghost toggle ${S.settings.daycycle !== false ? 'on' : ''}" id="btn-daycycle">Day &amp; night: ${S.settings.daycycle !== false ? 'Live' : 'Off'}</button>
         <button class="btn ghost" id="btn-wardrobe">Wardrobe</button>
         <button class="btn ghost" id="btn-layouts">Layouts</button>
       </div>
@@ -1406,9 +1379,16 @@ $('#btn-menu').addEventListener('click', () => {
     const k = b.dataset.acc; S.settings[k] = !S.settings[k]; applySettings(); save();
     b.classList.toggle('on', S.settings[k]); b.textContent = b.textContent.replace(/: (On|Off)$/, `: ${S.settings[k] ? 'On' : 'Off'}`);
   }));
-  $('#btn-lowfx').addEventListener('click', e => {
-    S.settings.lowfx = !S.settings.lowfx; save();
-    e.currentTarget.textContent = `Battery saver: ${S.settings.lowfx ? 'On' : 'Off'}`; e.currentTarget.classList.toggle('on', S.settings.lowfx);
+  $('#btn-gfx').addEventListener('click', e => {
+    const order = ['ultra', 'high', 'low'], cur = gfxQuality();
+    const next = order[(order.indexOf(cur) + 1) % order.length];
+    S.settings.lowfx = next === 'low'; S.settings.gfx = next === 'low' ? 'high' : next; S.settings.gfxManual = true; save();
+    e.currentTarget.textContent = `Graphics: ${gfxLabel()}`;
+    toast(next === 'low' ? 'Graphics: Low (battery saver)' : `Graphics: ${gfxLabel()}`, 'info');
+  });
+  $('#btn-daycycle').addEventListener('click', e => {
+    S.settings.daycycle = S.settings.daycycle === false; save();
+    e.currentTarget.textContent = `Day & night: ${S.settings.daycycle !== false ? 'Live' : 'Off'}`; e.currentTarget.classList.toggle('on', S.settings.daycycle !== false);
   });
   $('#modal-body').querySelectorAll('[data-theme-pick]').forEach(el => el.addEventListener('click', () => {
     const id = el.dataset.themePick;
@@ -1427,6 +1407,8 @@ $('#btn-menu').addEventListener('click', () => {
     }
   });
 });
+
+function gfxLabel() { const q = gfxQuality(); return q === 'ultra' ? 'Ultra' : q === 'high' ? 'High' : 'Low'; }
 
 function applySettings() {
   Sound.enabled = S.settings.sound;
@@ -1833,9 +1815,11 @@ function start(hotData) {
   $('#btn-hub').addEventListener('click', () => { Sound.play('click'); openHub(); });
   $('#edit-done').addEventListener('click', () => setEditMode(false));
   Music.start();
+  setTimeout(() => { const sp = document.getElementById('splash'); if (sp) { sp.classList.add('out'); setTimeout(() => sp.remove(), 700); } }, 900);
   setTimeout(() => { if (!B && loginClaimable() && S.tut >= 99 && modal.hidden) openLogin(); }, 1500);
   resize();
   recenter();
+  initSprites();
   ground = buildGroundCanvas(1.5, S.theme);
   if (!S.obstacles) { S.obstacles = []; for (let i = 0; i < 5; i++) spawnObstacle(true); }
   initAmbient();

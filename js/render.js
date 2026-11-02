@@ -43,7 +43,11 @@ function rr(ctx, x, y, w, h, r) {
 }
 
 // Oblique box: footprint (x,y,w,d) on the ground, raised by h. Top face drawn h px higher.
+// Oblique box: footprint (x,y,w,d) on the ground, raised by h. Top face drawn h px higher.
+// On higher graphics settings faces get sunlit gradients and a highlighted top edge.
+let BOX_FANCY = true;
 function box(ctx, x, y, w, d, h, top, side, radius = 3) {
+  // soft cast shadow toward the bottom-right
   ctx.fillStyle = PAL.shadow;
   ctx.beginPath();
   ctx.moveTo(x + 2, y + d);
@@ -53,12 +57,41 @@ function box(ctx, x, y, w, d, h, top, side, radius = 3) {
   ctx.lineTo(x + w, y);
   ctx.closePath();
   ctx.fill();
-  ctx.fillStyle = side;
+  if (BOX_FANCY && h > 3 && w > 8) {
+    const sg = ctx.createLinearGradient(x, 0, x + w, 0);
+    sg.addColorStop(0, tintCol(side, 0.1)); sg.addColorStop(1, tintCol(side, -0.25));
+    ctx.fillStyle = sg;
+  } else ctx.fillStyle = side;
   rr(ctx, x, y - h + 2, w, d + h - 2, radius); ctx.fill();
-  ctx.fillStyle = top;
+  if (BOX_FANCY && w > 8) {
+    const tg = ctx.createLinearGradient(x, y - h, x + w * 0.7, y - h + d);
+    tg.addColorStop(0, tintCol(top, 0.16)); tg.addColorStop(1, tintCol(top, -0.1));
+    ctx.fillStyle = tg;
+  } else ctx.fillStyle = top;
   rr(ctx, x, y - h, w, d, radius); ctx.fill();
-  ctx.strokeStyle = 'rgba(0,0,0,0.25)'; ctx.lineWidth = 1;
+  ctx.strokeStyle = 'rgba(0,0,0,0.28)'; ctx.lineWidth = 1;
   rr(ctx, x + 0.5, y - h + 0.5, w - 1, d - 1, radius); ctx.stroke();
+  if (BOX_FANCY && w > 8) {
+    // sunlit top and left edges
+    ctx.strokeStyle = 'rgba(255,250,225,0.28)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(x + 1.5, y - h + d - radius); ctx.lineTo(x + 1.5, y - h + radius); ctx.quadraticCurveTo(x + 1.5, y - h + 1.5, x + radius, y - h + 1.5); ctx.lineTo(x + w - radius, y - h + 1.5); ctx.stroke();
+  }
+}
+
+// Lighten (amt > 0) or darken (amt < 0) a colour given as #hex or rgb()/rgba().
+const _tintCache = new Map();
+function tintCol(col, amt) {
+  const key = col + amt;
+  let v = _tintCache.get(key);
+  if (v) return v;
+  let r, g, b, a = 1;
+  if (col[0] === '#') { const n = parseInt(col.slice(1), 16); r = (n >> 16) & 255; g = (n >> 8) & 255; b = n & 255; }
+  else { const m = col.match(/[\d.]+/g) || [0, 0, 0]; [r, g, b] = m.slice(0, 3).map(Number); if (m[3] != null) a = +m[3]; }
+  if (amt < 0) { r *= 1 + amt; g *= 1 + amt; b *= 1 + amt; } else { r += (255 - r) * amt; g += (255 - g) * amt; b += (255 - b) * amt; }
+  v = `rgba(${r | 0},${g | 0},${b | 0},${a})`;
+  if (_tintCache.size > 4000) _tintCache.clear();
+  _tintCache.set(key, v);
+  return v;
 }
 
 function pad(ctx, x, y, s, color = PAL.concrete, inset = 3) {
@@ -99,7 +132,8 @@ function levelChevrons(ctx, x, y, level, color = PAL.hazard) {
 
 /* ---------------- Terrain ---------------- */
 
-function buildGroundCanvas(scale, themeId) {
+// Original flat terrain, kept for reference; gfx.js provides the live version.
+function buildGroundCanvasClassic(scale, themeId) {
   const T = THEMES[themeId] || THEMES.forest;
   const W = MAP_W * TILE, H = MAP_H * TILE;
   const c = document.createElement('canvas');
