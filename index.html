@@ -59,6 +59,9 @@
     <button id="btn-gift" class="hud-box icon-btn" aria-label="Daily supply">
       <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="8" width="14" height="10" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M2 5.5h16v3H2zM10 5.5V18" stroke="currentColor" stroke-width="1.8" fill="none"/><path d="M10 5.5C8 2 5 2.5 6 4.5 6.6 5.6 10 5.5 10 5.5zM10 5.5c2-3.5 5-3 4-1-.6 1.1-4 1-4 1z" fill="currentColor"/></svg>
     </button>
+    <button id="btn-chest" class="hud-box icon-btn" aria-label="War Chest">
+      <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 9h14v8H3z" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M3 9a7 5 0 0 1 14 0" fill="none" stroke="currentColor" stroke-width="1.8"/><rect x="8.5" y="8" width="3" height="4" rx="0.8" fill="currentColor"/></svg>
+    </button>
     <button id="btn-hero" class="hud-box icon-btn" aria-label="Heroes">
       <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 11a6 6 0 0 1 12 0v1H4z" fill="currentColor"/><path d="M3 12.5h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M8 15l2 3 2-3" fill="none" stroke="#f2b632" stroke-width="1.8" stroke-linejoin="round"/></svg>
     </button>
@@ -92,20 +95,8 @@
     <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 4l7 6-7 6zM10 4l7 6-7 6z" fill="currentColor"/></svg>
     <span>Speed x1</span>
   </button>
-  <div id="abilities" class="battle-only">
-    <button id="ab-airstrike" class="ab-btn" aria-label="Airstrike">
-      <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 1.5l1.6 5.5 6.4 3.5v1.6l-6.4-1.7-.4 4.6 2 1.6v1.3L10 17l-3.2.9v-1.3l2-1.6-.4-4.6L2 12.1v-1.6L8.4 7z" fill="currentColor"/></svg>
-      <span class="ab-name">Airstrike</span><span class="ab-cd"></span>
-    </button>
-    <button id="ab-hero" class="ab-btn" aria-label="Hero ability" hidden>
-      <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 11a6 6 0 0 1 12 0v1H4z" fill="currentColor"/><path d="M3 12.5h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-      <span class="ab-name">Hero</span><span class="ab-cd"></span>
-    </button>
-    <button id="ab-repair" class="ab-btn" aria-label="Field repair">
-      <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M14.5 2.5a4 4 0 0 0-4.7 5.3L3 14.6 5.4 17l6.8-6.8a4 4 0 0 0 5.3-4.7l-2.4 2.4-2.3-.6-.6-2.3z" fill="currentColor"/></svg>
-      <span class="ab-name">Repair</span><span class="ab-cd"></span>
-    </button>
-  </div>
+  <div id="abilities" class="battle-only"></div>
+  <div id="deploy-bar" class="battle-only"></div>
   <button id="btn-retreat" class="big-btn battle-only">
     <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 3v15" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M6 4h10l-3 3.5 3 3.5H6z" fill="currentColor"/></svg>
     <span>Retreat</span>
@@ -168,8 +159,12 @@
 <script src="js/render.js"></script>
 <script src="js/audio.js"></script>
 <script src="js/battle.js"></script>
+<script src="js/arsenal.js"></script>
+<script src="js/army.js"></script>
+<script src="js/raid.js"></script>
 <script src="js/hero.js"></script>
 <script src="js/campaign.js"></script>
+<script src="js/meta.js"></script>
 <script src="js/game.js"></script>
 </body>
 </html>

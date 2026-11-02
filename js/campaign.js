@@ -104,10 +104,20 @@ function openCampaign() {
         <span class="daily-mods">${makeDaily().modNames.map(m => `<span>${m.name}</span>`).join('')}</span>
         <span class="daily-meta">${dailyDone() ? `Done for today. New challenge in ${timeToReset()}` : `+8 medals · resets in ${timeToReset()}`}</span>
       </button>
+      <button class="daily-card raid-card ${raidUnlocked() ? '' : 'done'}" id="btn-raid">
+        <span class="daily-tag">Boss raid</span>
+        <span class="daily-name">The Behemoth</span>
+        <span class="daily-mods"><span>Best this week ${Math.round(raidState().best * 100)}%</span></span>
+        <span class="daily-meta">${raidUnlocked() ? `${RAID.timeLimit} seconds to deal as much damage as you can. New week starts Monday.` : 'Unlocks at Command Center 3'}</span>
+      </button>
       <div class="op-track">${cards}</div>
       <div class="settings-row"><button class="btn ghost" data-close>Back to base</button></div>
     </div>`);
   $('#btn-daily').addEventListener('click', () => { Sound.play('click'); openMissionBrief(-1); });
+  $('#btn-raid').addEventListener('click', () => {
+    if (!raidUnlocked()) { toast('The Boss Raid unlocks at Command Center 3', 'bad'); Sound.play('error'); return; }
+    Sound.play('click'); openMissionBrief(-2);
+  });
   const track = $('.op-track');
   track.querySelectorAll('[data-mission]').forEach(el => el.addEventListener('click', () => {
     const i = +el.dataset.mission;
@@ -120,17 +130,17 @@ function openCampaign() {
 }
 
 function openMissionBrief(i) {
-  const m = i < 0 ? makeDaily() : CAMPAIGN[i];
+  const m = i === -2 ? makeRaid() : i < 0 ? makeDaily() : CAMPAIGN[i];
   const stars = m.daily ? 0 : missionStars(m.id);
-  const r = m.daily ? (dailyDone() ? { gold: 0, steel: 0, medals: 0 } : m.reward) : stars ? replayReward(m) : m.reward;
+  const r = m.raid ? { medals: RAID.tierMedals.reduce((a, b) => a + b, 0) } : m.daily ? (dailyDone() ? { gold: 0, steel: 0, medals: 0 } : m.reward) : stars ? replayReward(m) : m.reward;
   const enemies = missionEnemyTypes(m).map(([t, n]) => `<li class="ms-enemy"><span class="ms-art" data-type="${t}"></span><span>${ENEMIES[t].name}</span><b>&times;${n}</b></li>`).join('');
   const tags = modTags(m).map(t => `<span>${t}</span>`).join('');
   const under = hqLevel() < m.hq;
   openModal(`
     <div class="brief">
       <div class="brief-head">
-        <span class="stamp">${m.daily ? 'Daily challenge' : `Mission ${i + 1} of ${CAMPAIGN.length}`}</span>
-        <h2>${m.name} ${m.daily ? '' : starRow(stars)}</h2>
+        <span class="stamp">${m.raid ? 'Weekly boss raid' : m.daily ? 'Daily challenge' : `Mission ${i + 1} of ${CAMPAIGN.length}`}</span>
+        <h2>${m.name} ${m.daily || m.raid ? '' : starRow(stars)}</h2>
         <p>${m.brief}</p>
         ${tags ? `<div class="intel-tags ms-tags">${tags}</div>` : ''}
       </div>
@@ -140,7 +150,7 @@ function openMissionBrief(i) {
           <ul class="units ms-list">${enemies}</ul>
         </div>
         <div>
-          <h3>${m.daily && dailyDone() ? 'Already claimed today' : stars ? 'Replay reward' : 'Reward'}</h3>
+          <h3>${m.raid ? 'Up to (all 5 tiers)' : m.daily && dailyDone() ? 'Already claimed today' : stars ? 'Replay reward' : 'Reward'}</h3>
           <ul class="units">
             ${r.gold ? `<li><span>Gold</span><b>+${fmt(r.gold)}</b></li>` : ''}
             ${r.steel ? `<li><span>Steel</span><b>+${fmt(r.steel)}</b></li>` : ''}
@@ -156,11 +166,13 @@ function openMissionBrief(i) {
       <div class="brief-foot">
         <button class="btn battle-go" id="btn-mission-go">Deploy</button>
         <span class="soon">${under ? `Recommended: Command Center level ${m.hq}. You are at level ${hqLevel()}.` : 'Damage is repaired after the mission, win or lose.'}</span>
+        <button class="btn ghost" id="btn-mission-arsenal">Arsenal</button>
         <button class="btn ghost" id="btn-mission-back">Operation map</button>
       </div>
     </div>`);
   $('#modal-body').querySelectorAll('.ms-art').forEach(el => el.appendChild(renderEnemyPreview(el.dataset.type, 30)));
   $('#btn-mission-go').addEventListener('click', () => startBattle(m));
+  $('#btn-mission-arsenal').addEventListener('click', () => openArsenal(() => openMissionBrief(i)));
   $('#btn-mission-back').addEventListener('click', () => { closeModal(); openCampaign(); });
 }
 
@@ -182,7 +194,8 @@ function endMission(reason) {
     stars = campaignStars(frac);
     firstClear = m.daily ? !dailyDone() : !prev;
     reward = m.daily ? (firstClear ? m.reward : { gold: 0, steel: 0, medals: 0 }) : firstClear ? m.reward : replayReward(m);
-    if (m.daily) S.daily.done = dayKey();
+    if (m.daily) { if (firstClear) S.stats.dailies = (S.stats.dailies || 0) + 1; S.daily.done = dayKey(); }
+    B.battleStars += m.daily ? (firstClear ? 8 : 2) : stars * 2;
     const cap = storageCap();
     const g = Math.min(reward.gold || 0, Math.max(0, cap - S.gold)), st = Math.min(reward.steel || 0, Math.max(0, cap - S.steel));
     S.gold += g; S.steel += st; S.medals += reward.medals || 0;

@@ -120,7 +120,7 @@ function updateHero(dt) {
   // the engineer patches up buildings around her
   if (def.repair) {
     for (const b of S.buildings) {
-      if (b._dead || DEFS[b.type].trap || b._hp >= b._maxhp) continue;
+      if (b._dead || isPassive(b.type) || b._hp >= b._maxhp) continue;
       if (distToBuilding(H.x, H.y, b) <= 2.5) {
         b._hp = Math.min(b._maxhp, b._hp + def.repair * heroScale(st.level) * dt);
         if (Math.random() < dt * 4) { const c = centerOf(b); particles.push({ x: c.x + (Math.random() - 0.5) * 20, y: c.y, vx: 0, vy: -30, g: 0, life: 0.6, max: 0.6, r: 2.5, color: '#8fe07a' }); }

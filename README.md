@@ -81,11 +81,49 @@ Researched Kingdom Rush, Bloons TD 6, Boom Beach and Clash of Clans, and added t
 - **First-time tutorial**: guided hints for new players.
 - **Service record**: lifetime stats from the menu.
 
+## Update 1.0: Reinforcements
+
+The first major update, 22 features built on research into Clash of Clans, Boom Beach, Kingdom Rush and Bloons TD 6:
+
+**Your own army**
+1. **Barracks**: train troops between battles (army size grows with Barracks level).
+2. **Six troop types**: Rifle Squad, Machine Gunner, Combat Medic, Rocket Trooper, Marksman, Battle Tank.
+3. **Deploy in battle**: tap a troop card, then the map. Enemies stop to fight your troops. Survivors return home.
+4. **Rally orders**: move your whole army to a point.
+5. **Emergency reinforcements**: call in a squad for gold, any time.
+
+**Battle**
+6. **Arsenal**: choose your abilities. New: Paratroopers, Artillery Barrage, Smoke Screen, EMP Blast.
+7. **Support buildings**: Ammo Bunker (+fire rate aura) and Radar Station (+range aura).
+8. **Elite enemies**: golden-ringed, tougher, triple bounty.
+9. **Threat levels**: Recruit, Regular, Veteran, Nightmare for endless battles.
+10. **Weather and time of day**: rain, fog, dusk and night (with bonus loot).
+11. **Kill streaks**: bonus gold for fast chains of kills.
+12. **Veteran defenses**: defenses earn stars and bonus damage from kills.
+13. **Weekly Boss Raid**: the Behemoth, a three-phase walking fortress, with five reward tiers.
+
+**Progression**
+14. **War Chest**: a monthly 30-tier reward track filled by every battle.
+15. **Medals of Honor**: ten achievements with bronze, silver and gold tiers.
+16. **Quartermaster**: spend medals on supplies and boosts, with a daily deal.
+17. **Obstacles**: rocks, trees and wrecks appear in the base; clear them for medals.
+18. **Decorations**: flagpoles, searchlights, statues and more.
+19. **Map themes**: Forest, Desert and Winter.
+
+**Quality of life**
+20. **Save backup**: export and restore your base with a code.
+21. **Battery saver**: lighter effects and a lower frame rate.
+22. **What's new** screen for returning players.
+
 ## Code layout
 
 - `js/data.js` – building stats, costs, limits per HQ level, wave previews
 - `js/render.js` – procedural terrain and building art (canvas)
 - `js/audio.js` – synthesized sound effects and vibration
+- `js/army.js` – Barracks training, troop deployment, troop AI, rally and reinforcements
+- `js/arsenal.js` – abilities, loadout and their battle effects
+- `js/raid.js` – the weekly Behemoth boss raid
+- `js/meta.js` – War Chest, achievements, Quartermaster, obstacles, themes, backups, what's new
 - `js/hero.js` – heroes: movement, combat, abilities, levels and the hero screen
 - `js/campaign.js` – campaign missions: operation map, briefings, results and stars
 - `js/battle.js` – battle mode: waves, enemy pathing (flow field), turret fire, rewards

@@ -44,6 +44,13 @@ function migrate(s) {
   if (!s.heroes) s.heroes = { active: 'commando' };
   if (!s.login) s.login = { day: -1, last: '' };
   if (!s.daily) s.daily = { done: '' };
+  if (!s.army) s.army = { troops: {}, queue: [] };
+  if (!Array.isArray(s.loadout)) s.loadout = ['airstrike', 'repair'];
+  if (!s.threat) s.threat = 'regular';
+  if (!s.theme) s.theme = 'forest';
+  if (!s.boosts) s.boosts = {};
+  if (!s.ach) s.ach = {};
+  if (s.settings && s.settings.lowfx == null) s.settings.lowfx = false;
   if (s.tut == null) s.tut = (s.bestWave > 0 || s.buildings.length > 6) ? 99 : 0;
   return s;
 }
@@ -139,6 +146,7 @@ function footprintFree(type, x, y, ignoreId) {
     if (!inBuildArea(tx, ty)) return false;
     const id = grid[ty * MAP_W + tx];
     if (id && id !== ignoreId) return false;
+    if (obstacleAt(tx, ty)) return false;
   }
   return true;
 }
@@ -175,7 +183,7 @@ function upgradeStatus(b) {
 }
 
 function startJob(b, to) {
-  const time = Math.round(timeFor(b.type, to) * (1 - researchBonus('engineering')));
+  const time = Math.round(timeFor(b.type, to) * (1 - researchBonus('engineering')) * (boostActive('build') ? 0.5 : 1));
   if (time <= 0) { b.level = to; return; }
   const now = Date.now();
   b.job = { to, start: now, end: now + time * 1000 };
@@ -388,6 +396,7 @@ function confirmPlace() {
   pay(st.cost);
   Sound.play('build');
   tutorialEvent('build');
+  S.stats.built = (S.stats.built || 0) + 1;
   const b = { id: S.nextId++, type, x: placing.x, y: placing.y, level: 0, job: null, stored: 0, baseAngle: Math.random() * Math.PI * 2 };
   S.buildings.push(b);
   startJob(b, 1);
@@ -555,6 +564,8 @@ function tap(sx, sy) {
     updatePlacing();
     return;
   }
+  const ob = obstacleAt(Math.floor(w.x / TILE), Math.floor(w.y / TILE));
+  if (ob && !placing) { Sound.play('click'); openObstacle(ob); return; }
   if (S.drop && Math.hypot(w.x - (S.drop.x + 0.5) * TILE, w.y - (S.drop.y + 0.3) * TILE) < TILE * 0.9) { openDrop(); return; }
   // collection bubbles first (they float above the roof)
   for (const b of S.buildings) {
@@ -605,12 +616,14 @@ function update(dt) {
   const now = Date.now();
   if (!S.drop && now >= S.nextDrop && !B) spawnDrop();
   if (S.research.job && now >= S.research.job.end) finishResearch();
+  if (S.army.queue.length && now >= S.army.queue[0].end) processTraining(now);
+  if (!B) updateObstacles(now);
   for (const b of S.buildings) {
     if (b.job && now >= b.job.end && !B) completeJob(b);
     const d = DEFS[b.type];
     if (d.produces && b.level >= 1) {
       const st = statsFor(b.type, b.level);
-      b.stored = Math.min(st.hold, b.stored + (st.rate * (1 + researchBonus('logistics')) / 60) * dt);
+      b.stored = Math.min(st.hold, b.stored + (st.rate * (1 + researchBonus('logistics')) * (boostActive('prod') ? 2 : 1) / 60) * dt);
     }
     if (d.cat === 'defense' && !B) b.angle = b.baseAngle + Math.sin(tSec * 0.45 + b.id * 1.7) * 1.1;
     if (b.type === 'steelworks' && b.level >= 1 && b._chimney && Math.random() < dt * 4) {
@@ -684,13 +697,14 @@ function drawBirds() {
 let frameDt = 0;
 function draw() {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.fillStyle = '#2c3a20';
+  ctx.fillStyle = (THEMES[S.theme] || THEMES.forest).bg;
   ctx.fillRect(0, 0, vw, vh);
   const z = cam.z;
   const sh = shakeOffset(frameDt);
   ctx.setTransform(dpr * z, 0, 0, dpr * z, dpr * (vw / 2 - cam.x * z + sh.x), dpr * (vh / 2 - cam.y * z + sh.y));
   if (ground) ctx.drawImage(ground, 0, 0, MAP_W * TILE, MAP_H * TILE);
   drawBattleDecals(ctx);
+  for (const o of (S.obstacles || [])) drawObstacle(ctx, o, tSec);
 
   if (placing) drawGridOverlay();
 
@@ -706,7 +720,7 @@ function draw() {
       const link = o => o && o.type === 'wall' && o.level >= 1 && !o._dead && !(placing && placing.moveId === o.id);
       nb = { r: link(r), d: link(d) };
     }
-    if (b._dead) { if (!DEFS[b.type].trap) drawRubble(ctx, b); continue; }
+    if (b._dead) { if (!isPassive(b.type)) drawRubble(ctx, b); continue; }
     drawBuilding(ctx, b, tSec, nb);
     if (b.job && !B) {
       drawScaffold(ctx, b, tSec);
@@ -739,7 +753,7 @@ function draw() {
     drawCoinIcon(ctx, p.x, p.y, 8, DEFS[b.type].produces);
   }
 
-  drawCloudShadows();
+  if (!S.settings.lowfx) drawCloudShadows();
   for (const p of particles) {
     const a = clamp(p.life / p.max, 0, 1);
     const smoke = p.color === 'smoke' || p.color === 'smoke-dark';
@@ -750,7 +764,7 @@ function draw() {
     if (p.glow) ctx.globalCompositeOperation = 'source-over';
   }
   ctx.globalAlpha = 1;
-  drawBirds();
+  if (!S.settings.lowfx) drawBirds();
   drawBattleAir(ctx);
   for (const f of floaters) {
     ctx.globalAlpha = clamp(f.life / f.max * 1.5, 0, 1);
@@ -760,6 +774,47 @@ function draw() {
     ctx.fillStyle = f.color; ctx.fillText(f.text, f.x, f.y);
   }
   ctx.globalAlpha = 1;
+  drawAtmosphere();
+}
+
+// Battle weather and time of day, painted over the world in screen space.
+const rainDrops = [];
+function drawAtmosphere() {
+  if (!B) return;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const dark = B.daytime ? B.daytime.dark : 0;
+  if (dark > 0) {
+    ctx.fillStyle = `rgba(8,14,30,${dark})`; ctx.fillRect(0, 0, vw, vh);
+    // muzzle flashes and explosions light up the dark
+    ctx.setTransform(dpr * cam.z, 0, 0, dpr * cam.z, dpr * (vw / 2 - cam.x * cam.z), dpr * (vh / 2 - cam.y * cam.z));
+    ctx.globalCompositeOperation = 'lighter';
+    for (const f of B.fx) {
+      if (f.kind !== 'light' && f.kind !== 'boom') continue;
+      const k = f.life / f.max, r = (f.kind === 'boom' ? f.r * 3 : f.r) * 1.2;
+      const g = ctx.createRadialGradient(f.x, f.y, 0, f.x, f.y, r);
+      g.addColorStop(0, `rgba(255,190,110,${0.5 * k * dark * 1.6})`); g.addColorStop(1, 'rgba(255,140,40,0)');
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(f.x, f.y, r, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  if (B.weather.id === 'fog') {
+    const g = ctx.createRadialGradient(vw / 2, vh / 2, Math.min(vw, vh) * 0.2, vw / 2, vh / 2, Math.max(vw, vh) * 0.7);
+    g.addColorStop(0, 'rgba(220,225,215,0.12)'); g.addColorStop(1, 'rgba(220,225,215,0.5)');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, vw, vh);
+  } else if (B.weather.id === 'rain' && !S.settings.lowfx) {
+    while (rainDrops.length < 90) rainDrops.push({ x: Math.random() * vw, y: Math.random() * vh, s: 500 + Math.random() * 300 });
+    ctx.strokeStyle = 'rgba(200,215,230,0.35)'; ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (const r of rainDrops) {
+      r.y += r.s * frameDt; r.x -= r.s * 0.2 * frameDt;
+      if (r.y > vh) { r.y = -10; r.x = Math.random() * (vw + 60); }
+      ctx.moveTo(r.x, r.y); ctx.lineTo(r.x - 3, r.y + 12);
+    }
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(40,55,70,0.12)'; ctx.fillRect(0, 0, vw, vh);
+  }
+  if (B.empFlash > 0) { ctx.fillStyle = `rgba(150,210,255,${B.empFlash})`; ctx.fillRect(0, 0, vw, vh); }
 }
 
 function drawGridOverlay() {
@@ -785,6 +840,7 @@ function drawRange(cx, cy, r, color, dashed) {
 function drawSelection(b) {
   const n = DEFS[b.type].size * TILE, x = b.x * TILE, y = b.y * TILE, d = DEFS[b.type];
   const c = centerOf(b);
+  if (d.auraRange && b.level >= 1) drawRange(c.x, c.y, d.auraRange * TILE, d.aura === 'rate' ? 'rgba(242,182,50,A)' : 'rgba(110,190,255,A)', false);
   if (d.range && b.level >= 1) {
     drawRange(c.x, c.y, d.range * TILE, 'rgba(242,182,50,A)', true);
     if (d.minRange) drawRange(c.x, c.y, d.minRange * TILE, 'rgba(200,64,42,A)', true);
@@ -827,6 +883,7 @@ function drawGhost() {
 }
 
 function frame(now) {
+  if (S.settings.lowfx && now - lastFrame < 30) { requestAnimationFrame(frame); return; }
   const dt = Math.min(0.1, (now - lastFrame) / 1000);
   lastFrame = now;
   // one bad frame must never stop the game loop
@@ -903,7 +960,9 @@ function updateHUD() {
   const gift = loginClaimable();
   if (hudCache.gift !== gift) { hudCache.gift = gift; $('#btn-gift').classList.toggle('has-dot', gift); }
   updateTutorial();
-  const ready = claimableMissions();
+  const ready = claimableMissions() + achClaimable();
+  const cc = chestClaimable();
+  if (hudCache.chest !== cc) { hudCache.chest = cc; $('#btn-chest').classList.toggle('has-dot', cc > 0); }
   setText($('#btn-missions .dot'), 'mdot', ready ? String(ready) : '');
   const anyBubble = !B && !placing && S.buildings.some(hasBubble);
   if (hudCache.ca !== anyBubble) { hudCache.ca = anyBubble; $('#btn-collect').hidden = !anyBubble; }
@@ -947,6 +1006,9 @@ function statChips(b) {
     out.push(chip('RATE', cur.rate, nxt && nxt.rate, '/min'));
     out.push(`<span class="chip"><b>MINED</b><span data-live="stored">${fmt(b.stored)}</span> / ${fmt(cur.hold)}</span>`);
   }
+  if (b.type === 'barracks') out.push(chip('ARMY SIZE', barracksCapacity(L), nxt && barracksCapacity(L + 1)));
+  if (d.aura) out.push(chip(d.aura === 'rate' ? 'FIRE RATE' : 'RANGE', '+' + Math.round(auraOf(b) * 100) + '%', nxt && '+' + Math.round((d.auraBase + d.auraPer * L) * 100) + '%'), chip('AURA', d.auraRange + ' tiles', null));
+  if (d.dmg && !d.trap && (b.kills || 0) > 0) { const vr = vetRank(b.kills); out.push(`<span class="chip"><b>KILLS</b>${fmt(b.kills)}${vr ? ` <i class="vet">${'★'.repeat(vr)} +${Math.round(VET_RANKS[vr - 1].bonus * 100)}%</i>` : ''}</span>`); }
   if (b.type === 'depot') out.push(chip('STORAGE', '+' + fmt(cur.storage), nxt && '+' + fmt(nxt.storage)));
   if (b.type === 'hq') {
     out.push(chip('LEVEL CAP', L, nxt ? L + 1 : null));
@@ -969,7 +1031,7 @@ function statChips(b) {
       else out.push(`<span class="chip"><b>SPEC</b>at level ${SPEC_LEVEL}</span>`);
     }
   }
-  out.push(chip('HP', fmt(cur.hp), nxt && fmt(nxt.hp)));
+  if (!d.trap && !d.deco) out.push(chip('HP', fmt(cur.hp), nxt && fmt(nxt.hp)));
   return out.join('');
 }
 
@@ -1031,6 +1093,7 @@ function buildPanel(b, up) {
     }
     actions += `<button class="btn ghost" data-act="move">Move</button>`;
     if (b.type === 'hq') actions += `<button class="btn ghost" data-act="roadmap">Roadmap</button>`;
+    if (b.type === 'barracks' && b.level >= 1) actions += `<button class="btn" data-act="barracks"><span class="btn-main">Train</span><span class="btn-sub">Army ${armySpace()}/${armyCapacity()}</span></button>`;
     if (b.type === 'lab' && b.level >= 1) actions += `<button class="btn medal-btn" data-act="research"><span class="btn-main">Research</span><span class="btn-sub">${S.research.job ? fmtTime((S.research.job.end - Date.now()) / 1000) : 'Ready'}</span></button>`;
     if (b.type !== 'hq') {
       actions += sellArmed
@@ -1066,6 +1129,7 @@ panel.addEventListener('click', e => {
   else if (act === 'finish') finishNow(b);
   else if (act === 'roadmap') { openRoadmap(); return; }
   else if (act === 'research') { openResearch(); return; }
+  else if (act === 'barracks') { openBarracks(); return; }
   else if (act === 'spec') { openSpec(b); return; }
   else if (act === 'priority') {
     const i = PRIORITIES.findIndex(p => p.id === (b.priority || 'close'));
@@ -1191,44 +1255,57 @@ function defenseRating() {
   return { dps, walls, towers };
 }
 
-$('#btn-battle').addEventListener('click', () => {
-  if (placing) cancelPlace();
-  if (B) return;
-  const wave = 1;
+$('#btn-battle').addEventListener('click', () => { if (placing) cancelPlace(); if (!B) openBattleBrief(); });
+
+function openBattleBrief() {
   const r = defenseRating();
-  const comp = waveComposition(wave).map(u => `<li><span>${ENEMIES[u.type].name}</span><b>&times;${u.count}</b></li>`).join('');
+  const comp = waveComposition(1).map(u => `<li><span>${ENEMIES[u.type].name}</span><b>&times;${u.count}</b></li>`).join('');
+  const threats = THREATS.map(t => {
+    const ok = (S.bestWave || 0) >= t.need;
+    return `<button class="thr ${S.threat === t.id ? 'on' : ''} ${ok ? '' : 'locked'}" data-threat="${t.id}">
+      <b>${t.name}</b><span>${ok ? `Loot x${t.loot}` : `Survive wave ${t.need}`}</span></button>`;
+  }).join('');
+  const troops = Object.keys(TROOPS).filter(t => troopCount(t) > 0).map(t => `${troopCount(t)} ${TROOPS[t].name}`).join(', ');
   openModal(`
     <div class="brief">
       <div class="brief-head">
         <span class="stamp">Intel report</span>
         <h2>Hold the line</h2>
-        <p>Enemy waves will keep coming down the roads, each one bigger than the last. Every kill and every wave you survive pays out gold and steel. Damage is repaired after the battle.</p>
+        <p>Enemy waves keep coming down the roads, each one bigger than the last. Every kill and every wave you survive pays out. Damage is repaired after the battle.</p>
       </div>
+      <h3 class="report-h">Threat level</h3>
+      <div class="thr-row">${threats}</div>
       <div class="brief-cols">
         <div>
           <h3>First wave</h3>
           <ul class="units">${comp}</ul>
         </div>
         <div>
-          <h3>Your defenses</h3>
+          <h3>Your forces</h3>
           <ul class="units">
-            <li><span>Turrets</span><b>${r.towers}</b></li>
-            <li><span>Firepower</span><b>${r.dps} DPS</b></li>
-            <li><span>Wall segments</span><b>${r.walls}</b></li>
-            <li><span>Best wave survived</span><b>${S.bestWave || 0}</b></li>
+            <li><span>Turrets</span><b>${r.towers} · ${r.dps} DPS</b></li>
+            <li><span>Army</span><b>${troops ? armySpace() + ' / ' + armyCapacity() : 'No troops'}</b></li>
+            <li><span>Abilities</span><b>${loadout().map(k => ABILITIES[k].short).join(', ') || 'None'}</b></li>
+            <li><span>Best wave</span><b>${S.bestWave || 0}</b></li>
           </ul>
         </div>
       </div>
       <div class="brief-foot">
         <button class="btn battle-go" id="btn-deploy">Start battle</button>
+        <button class="btn ghost" id="btn-arsenal">Arsenal</button>
         <button class="btn ghost" id="btn-intel">Enemy guide</button>
-        <span class="soon">Tip: walls slow the enemy down while your turrets fire.</span>
-        <button class="btn ghost" data-close>Back to base</button>
+        <button class="btn ghost" data-close>Back</button>
       </div>
     </div>`);
-  $('#btn-deploy').addEventListener('click', startBattle);
+  $('#btn-deploy').addEventListener('click', () => startBattle(null));
   $('#btn-intel').addEventListener('click', () => openFieldGuide(true));
-});
+  $('#btn-arsenal').addEventListener('click', () => openArsenal(openBattleBrief));
+  $('#modal-body').querySelectorAll('[data-threat]').forEach(el => el.addEventListener('click', () => {
+    const t = THREATS.find(x => x.id === el.dataset.threat);
+    if ((S.bestWave || 0) < t.need) { toast(`Survive wave ${t.need} to unlock ${t.name}`, 'bad'); Sound.play('error'); return; }
+    S.threat = t.id; save(); Sound.play('click'); openBattleBrief();
+  }));
+}
 
 $('#btn-menu').addEventListener('click', () => {
   openModal(`
@@ -1238,7 +1315,9 @@ $('#btn-menu').addEventListener('click', () => {
         <li><b>Build</b> opens the shop. Drag the outline into place, then tap the check mark.</li>
         <li><b>Tap a building</b> to upgrade, move or sell it. Mines show a bubble when they have something to collect.</li>
         <li><b>Drag</b> to look around and <b>pinch</b> to zoom.</li>
-        <li>Upgrade the <b>Command Center</b>: every level unlocks a new defense and lets your other buildings go one level higher. Tap it and open <b>Roadmap</b> to see all 8 levels.</li>
+        <li>Upgrade the <b>Command Center</b>: every level unlocks a new defense and lets your other buildings go one level higher. Tap it and open <b>Roadmap</b> to see all 12 levels.</li>
+        <li>Build a <b>Barracks</b> to train troops. In battle, tap a troop card and then the map to deploy; use <b>Rally</b> to move them. Survivors come home.</li>
+        <li>Tap your <b>medal counter</b> to visit the Quartermaster, and the chest icon for this month's <b>War Chest</b>.</li>
         <li><b>Battle</b> sends endless enemy waves down the roads. Survive as long as you can; kills and cleared waves pay out, and the base is repaired afterwards.</li>
         <li>Earn <b>medals</b> from battles, missions and promotions. Spend them to finish construction instantly or to hire more builders.</li>
         <li>Your base saves automatically on this device.</li>
@@ -1249,6 +1328,12 @@ $('#btn-menu').addEventListener('click', () => {
         <button class="btn ghost" id="btn-fs">Fullscreen</button>
         <button class="btn ghost" id="btn-recenter">Recenter view</button>
         <button class="btn ghost" id="btn-record">Service record</button>
+        <button class="btn ghost" id="btn-backup">Backup</button>
+        <button class="btn ghost toggle ${S.settings.lowfx ? 'on' : ''}" id="btn-lowfx">Battery saver: ${S.settings.lowfx ? 'On' : 'Off'}</button>
+      </div>
+      <div class="settings-row theme-row">
+        <span class="field-label">Map theme</span>
+        ${Object.keys(THEMES).map(id => `<button class="btn ghost toggle ${S.theme === id ? 'on' : ''} ${hqLevel() >= THEMES[id].need ? '' : 'off'}" data-theme-pick="${id}">${THEMES[id].name}${hqLevel() >= THEMES[id].need ? '' : ` (HQ ${THEMES[id].need})`}</button>`).join('')}
         <button class="btn danger-outline" id="btn-reset">Reset base</button>
         <button class="btn" data-close>Done</button>
       </div>
@@ -1267,6 +1352,17 @@ $('#btn-menu').addEventListener('click', () => {
   });
   $('#btn-recenter').addEventListener('click', () => { recenter(); closeModal(); });
   $('#btn-record').addEventListener('click', openRecord);
+  $('#btn-backup').addEventListener('click', openBackup);
+  $('#btn-lowfx').addEventListener('click', e => {
+    S.settings.lowfx = !S.settings.lowfx; save();
+    e.currentTarget.textContent = `Battery saver: ${S.settings.lowfx ? 'On' : 'Off'}`; e.currentTarget.classList.toggle('on', S.settings.lowfx);
+  });
+  $('#modal-body').querySelectorAll('[data-theme-pick]').forEach(el => el.addEventListener('click', () => {
+    const id = el.dataset.themePick;
+    if (hqLevel() < THEMES[id].need) { toast(`Unlocks at Command Center ${THEMES[id].need}`, 'bad'); return; }
+    setTheme(id);
+    $('#modal-body').querySelectorAll('[data-theme-pick]').forEach(x => x.classList.toggle('on', x.dataset.themePick === id));
+  }));
   const reset = $('#btn-reset');
   reset.addEventListener('click', () => {
     if (reset.dataset.armed) {
@@ -1361,11 +1457,12 @@ function openMissions() {
     </li>`).join('');
   openModal(`
     <div class="settings">
-      <div class="m-head"><h2>Missions</h2><span class="m-count">${doneCount} / ${MISSIONS.length} complete</span></div>
+      <div class="m-head"><h2>Missions</h2><div class="tabs"><button class="tab on">Missions</button><button class="tab" id="tab-ach">Achievements${achClaimable() ? ` (${achClaimable()})` : ''}</button></div><span class="m-count">${doneCount} / ${MISSIONS.length}</span></div>
       <ul class="missions">${list || '<li class="mission"><div class="m-text">Every mission is complete. Outstanding work, Commander.</div></li>'}</ul>
       <div class="settings-row"><button class="btn" data-close>Done</button></div>
     </div>`);
   $('#modal-body').querySelectorAll('[data-claim]').forEach(btn => btn.addEventListener('click', () => claimMission(btn.dataset.claim)));
+  $('#tab-ach').addEventListener('click', openAchievements);
 }
 function claimMission(id) {
   const m = MISSIONS.find(x => x.id === id);
@@ -1672,12 +1769,16 @@ function start(hotData) {
   $('#btn-campaign').addEventListener('click', () => { Sound.play('click'); tutorialEvent('campaign'); openCampaign(); });
   $('#btn-hero').addEventListener('click', () => { if (!B) { Sound.play('click'); openHeroes(); } });
   $('#btn-gift').addEventListener('click', () => { if (!B) { Sound.play('click'); openLogin(); } });
-  setTimeout(() => { if (!B && loginClaimable() && S.tut >= 99 && modal.hidden) openLogin(); }, 1200);
+  $('#btn-chest').addEventListener('click', () => { if (!B) { Sound.play('click'); openChest(); } });
+  $('#medals').addEventListener('click', () => { if (!B) { Sound.play('click'); openQuartermaster(); } });
+  setTimeout(() => { if (!B && modal.hidden) maybeShowWhatsNew(); }, 700);
+  setTimeout(() => { if (!B && loginClaimable() && S.tut >= 99 && modal.hidden) openLogin(); }, 1500);
   resize();
   recenter();
-  ground = buildGroundCanvas(1.5);
+  ground = buildGroundCanvas(1.5, S.theme);
+  if (!S.obstacles) { S.obstacles = []; for (let i = 0; i < 5; i++) spawnObstacle(true); }
   initAmbient();
-  if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { ground = buildGroundCanvas(1.5); });
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { ground = buildGroundCanvas(1.5, S.theme); });
   window.addEventListener('resize', () => { resize(); });
   document.addEventListener('visibilitychange', () => { if (document.hidden) save(); });
   window.addEventListener('pagehide', save);

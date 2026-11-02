@@ -29,19 +29,33 @@ function startBattle(mission) {
     wave: 0, phase: 'break', breakT: 2.5, queue: [], spawnT: 0, spawnIdx: 0,
     units: [], shots: [], fx: [], kills: 0, waves: 0,
     loot: { gold: 0, steel: 0 }, medals: 0, speed: 1, flow: null, flowDirty: true, over: false,
-    ab: { airstrike: 3, repair: 0 }, targeting: false, planes: [], dmgBy: {}, bosses: 0, decals: [],
+    ab: {}, targeting: null, planes: [], dmgBy: {}, bosses: 0, decals: [],
     mission: mission || null, mods: (mission && mission.mods) || {},
     sentries: [], hero: null, firstWaveEarly: 0,
+    troops: [], deployed: {}, smokes: [], reinforceCd: 0, deployPick: null, rallyMode: false, lost: 0,
+    streak: 0, streakT: 0, bestStreak: 0, battleStars: 0,
   };
+  // threat level (endless only), weather and time of day
+  const threat = !mission ? (THREATS.find(t => t.id === S.threat) || THREATS[1]) : THREATS[1];
+  B.threat = threat;
+  B.weather = pickWeighted(WEATHER);
+  B.daytime = mission && mission.raid ? DAYTIME[0] : pickWeighted(DAYTIME);
+  B.lootMul = (mission ? 1 : threat.loot) * B.daytime.loot;
   B.ab.hero = 4;
   if (!B.mods.noHero) B.hero = spawnHero();
+  if (mission && mission.raid) startRaid(mission);
+  computeAuras();
+  buildAbilityBar();
+  buildDeployBar();
   S.stats.battles = (S.stats.battles || 0) + 1;
   if (S.tut != null && S.tut < 9) tutorialEvent('battle');
   S.battles = (S.battles || 0) + 1;
   document.body.classList.add('in-battle');
   setSpeedLabel();
-  if (B.mission) banner(B.mission.name, `${B.mission.waves.length} waves. Hold the Command Center`);
-  else banner('Defend the base', 'First wave approaching from the west road');
+  const cond = `${B.daytime.name} · ${B.weather.name}${B.weather.range < 1 ? ` (ranges -${Math.round((1 - B.weather.range) * 100)}%)` : ''}`;
+  if (B.mission && B.mission.raid) banner('Boss raid: Behemoth', `Deal as much damage as you can in ${RAID.timeLimit} seconds`);
+  else if (B.mission) banner(B.mission.name, `${B.mission.waves.length} waves · ${cond}`);
+  else banner(`Threat: ${threat.name}`, cond);
   document.body.classList.toggle('no-airstrike', !!B.mods.noAirstrike);
   Sound.play('alarm');
 }
@@ -83,6 +97,7 @@ function startWave(n) {
 
 function endBattle(reason) {
   if (!B || B.over) return;
+  if (B.mission && B.mission.raid) { endRaid(reason); return; }
   if (B.mission) { endMission(reason); return; }
   B.over = true;
   const survived = B.waves;
@@ -90,7 +105,7 @@ function endBattle(reason) {
   if (record) S.bestWave = survived;
   save();
   Sound.play(reason === 'retreat' ? 'win' : 'lose');
-  const names = { hq: 'Command Center gun', airstrike: 'Airstrikes', hero: B.hero ? HEROES[B.hero.id].name : 'Hero' };
+  const names = { hq: 'Command Center gun', airstrike: 'Airstrikes', artillery: 'Artillery barrage', troops: 'Your troops', hero: B.hero ? HEROES[B.hero.id].name : 'Hero' };
   const top = Object.entries(B.dmgBy).sort((a, b) => b[1] - a[1]).slice(0, 4);
   const total = top.reduce((a, [, v]) => a + v, 0) || 1;
   const report = top.length ? top.map(([k, v]) => `<li><span>${names[k] || DEFS[k].name}</span><b>${fmt(v)} <small>${Math.round(v / total * 100)}%</small></b></li>`).join('') : '<li><span>No damage dealt</span><b>0</b></li>';
@@ -135,9 +150,12 @@ function endBattle(reason) {
 // Called when the after-action report closes: repair the base and go back to building.
 function leaveBattle() {
   if (!B) return;
+  const back = returnTroops();
+  if (back) setTimeout(() => toast(`${back} troop${back > 1 ? 's' : ''} returned to the Barracks`, 'info'), 400);
+  awardChestStars(B.battleStars);
   for (const b of S.buildings) { delete b._hp; delete b._maxhp; delete b._dead; delete b._cd; delete b._tgt; delete b._heal; delete b._beamOn; b._flash = 0; }
   B = null;
-  document.body.classList.remove('in-battle', 'hq-danger', 'targeting', 'no-airstrike');
+  document.body.classList.remove('in-battle', 'hq-danger', 'targeting', 'no-airstrike', 'deploying');
   $('#banner').hidden = true;
   rebuildGrid();
   save();
@@ -147,7 +165,7 @@ function leaveBattle() {
 
 function liveBuildingAtTile(tx, ty) {
   const b = buildingAtTile(tx, ty);
-  return b && !b._dead && !DEFS[b.type].trap ? b : null;
+  return b && !b._dead && !isPassive(b.type) ? b : null;
 }
 
 // Cost of stepping onto a tile: buildings count as slow ground proportional to their hp,
@@ -212,6 +230,11 @@ function computeFlow() {
 function battleUpdate(dt) {
   if (!B || B.over) return;
   if (B.flowDirty) computeFlow();
+  if (B.reinforceCd > 0) B.reinforceCd -= dt;
+  if (B.streakT > 0) { B.streakT -= dt; if (B.streakT <= 0) B.streak = 0; }
+  if (B.raid) updateRaid(dt);
+  updateTroops(dt);
+  updateSmokes(dt);
 
   if (B.phase === 'break') {
     B.breakT -= dt;
@@ -239,6 +262,7 @@ function battleUpdate(dt) {
   for (const b of S.buildings) if (b.type === 'mine' && !b._dead && b.level >= 1) checkMine(b);
 
   for (const p of B.shots) updateShot(p, dt);
+  SHOOTER = null;
   B.shots = B.shots.filter(p => !p.done);
   for (const d of B.decals) d.life -= dt;
   if (B.decals.length && B.decals[0].life <= 0) B.decals = B.decals.filter(d => d.life > 0);
@@ -267,8 +291,12 @@ function spawnEnemy(type) {
   const gate = B.gates[B.spawnIdx++ % B.gates.length];
   const p = GATES[gate]();
   const e = ENEMIES[type];
-  const hp = Math.round(enemyHp(type, B.mission ? B.mission.level + B.wave - 1 : B.wave) * (B.mods.armored || 1) * (B.mods.swarm ? 0.55 : 1));
+  const lvl = B.mission ? B.mission.level + B.wave - 1 : B.wave;
+  const eliteChance = e.boss ? 0 : (B.mission ? (lvl >= 8 ? 0.06 : 0) : (B.wave >= 6 ? B.threat.elite : 0));
+  const elite = Math.random() < eliteChance;
+  const hp = e.raidBoss ? raidBossHp() : Math.round(enemyHp(type, lvl) * (B.mods.armored || 1) * (B.mods.swarm ? 0.55 : 1) * (B.mission ? 1 : B.threat.hp) * (elite ? ELITE.hp : 1));
   B.units.push({
+    elite, dmgK: e.raidBoss ? raidBossDmgK() : 1,
     type, x: p.x + (Math.random() - 0.5) * 24, y: p.y + (Math.random() - 0.5) * 24,
     hp, max: hp, cd: Math.random(), angle: 0, aim: 0, walk: Math.random() * 6,
     ox: (Math.random() - 0.5) * 16, oy: (Math.random() - 0.5) * 16,
@@ -280,6 +308,7 @@ function waveCleared() {
   const n = B.wave;
   if (B.hero) addHeroXP(B.hero.id, 10 + n * 2);
   S.stats.wavesCleared = (S.stats.wavesCleared || 0) + 1;
+  if (!B.mission) B.battleStars += n >= 10 ? 2 : 1;
   if (B.mission) {
     B.waves = n;
     addXP(15 * n);
@@ -305,7 +334,7 @@ function waveCleared() {
 
 function addLoot(kind, amt) {
   const space = Math.max(0, storageCap() - S[kind]);
-  const got = Math.min(space, Math.floor(amt));
+  const got = Math.min(space, Math.floor(amt * (B.lootMul || 1)));
   S[kind] += got;
   B.loot[kind] += got;
   if (got > 0) pulseRes(kind);
@@ -324,7 +353,7 @@ function distToBuilding(x, y, b) {
 function nearestBuilding(x, y, range, skipWalls) {
   let best = null, bd = range;
   for (const b of S.buildings) {
-    if (b._dead || DEFS[b.type].trap || (skipWalls && b.type === 'wall')) continue;
+    if (b._dead || isPassive(b.type) || (skipWalls && b.type === 'wall')) continue;
     const d = distToBuilding(x, y, b);
     if (d <= bd) { bd = d; best = b; }
   }
@@ -333,8 +362,13 @@ function nearestBuilding(x, y, range, skipWalls) {
 
 function updateEnemy(u, dt) {
   const e = ENEMIES[u.type];
+  // EMP: frozen vehicles and drones do nothing
+  if (u.stun > 0) { u.stun -= dt; u.moving = false; if (Math.random() < dt * 8) B.fx.push({ kind: 'bolt', x1: u.x - 8, y1: u.y - 6, x2: u.x + 8, y2: u.y + 4, life: 0.1, seed: Math.random() * 999 }); return; }
   // barbed wire slows and cuts foot soldiers
-  u.slow = 1;
+  u.slow = B.weather && B.weather.slow ? B.weather.slow : 1;
+  u.smoked = B.smokes.length > 0 && inSmoke(u.x, u.y);
+  if (u.smoked) u.slow *= 0.5;
+  const dmgMul = (u.elite ? ELITE.dmg : 1) * (u.dmgK || 1) * (u.smoked && Math.random() < 0.5 ? 0 : 1);
   if (!u.air && !e.vehicle) {
     const tile = buildingAtTile(Math.floor(u.x / TILE), Math.floor(u.y / TILE));
     if (tile && tile.type === 'wire' && tile.level >= 1) {
@@ -353,17 +387,17 @@ function updateEnemy(u, dt) {
     else if (u.tgt && distToBuilding(u.x, u.y, u.tgt) > e.range + 0.3) u.tgt = null;
   }
 
-  // a hero standing close by draws ground troops into a fight and holds them in place
-  const H = B.hero;
-  if (H && !H.dead && !u.air && !e.sapper && !e.heal && Math.hypot(H.x - u.x, H.y - u.y) <= (e.range + 0.2) * TILE) {
+  // your hero or troops standing close by draw ground enemies into a fight and hold them in place
+  const ally = (!u.air && !e.sapper && !e.heal) ? nearestAlly(u.x, u.y, (e.range + 0.2) * TILE) : null;
+  if (ally) {
     u.moving = false;
-    u.aim = Math.atan2(H.y - u.y, H.x - u.x);
+    u.aim = Math.atan2(ally.y - u.y, ally.x - u.x);
     if (!e.vehicle) u.angle = u.aim;
     if (u.cd <= 0) {
       u.cd = 1 / e.rate; u.flash = 0.06;
-      damageHero(e.dmg);
-      B.fx.push({ kind: 'tracer', x1: u.x, y1: u.y - 2, x2: H.x, y2: H.y - 2, life: 0.07, color: '#ff9a6a' });
-      Sound.play('rifle');
+      damageAlly(ally, e.dmg * dmgMul * (e.boss ? 1 : e.splash ? 0.8 : 1));
+      B.fx.push({ kind: 'tracer', x1: u.x, y1: u.y - 2, x2: ally.x, y2: ally.y - 2, life: 0.07, color: '#ff9a6a' });
+      Sound.play(e.vehicle ? 'cannon' : 'rifle');
     }
     if (u.flash > 0) u.flash -= dt;
     return;
@@ -428,7 +462,7 @@ function updateEnemy(u, dt) {
       u.cd = 1 / e.rate;
       const hx = c.x + (Math.random() - 0.5) * 16, hy = c.y + (Math.random() - 0.5) * 16;
       if (e.flamer) {
-        damageBuilding(u.tgt, e.dmg);
+        damageBuilding(u.tgt, e.dmg * dmgMul);
         Sound.play('flame');
         for (let i = 0; i < 3; i++) {
           particles.push({ x: u.x + Math.cos(u.aim) * 10, y: u.y + Math.sin(u.aim) * 10, vx: (hx - u.x) * (2 + Math.random()) + (Math.random() - 0.5) * 30, vy: (hy - u.y) * (2 + Math.random()) + (Math.random() - 0.5) * 30, g: -20, life: 0.3, max: 0.3, r: 3, grow: 12, color: Math.random() < 0.5 ? '#ffb347' : '#ff6a2a', glow: true });
@@ -436,10 +470,10 @@ function updateEnemy(u, dt) {
       } else if (e.splash) {
         const dur = e.lob ? 1.4 : u.type === 'tank' || u.type === 'siege' ? 0.35 : u.type === 'heli' ? 0.4 : 0.6;
         const arc = u.type === 'grenadier' ? 26 : e.lob ? 110 : 0;
-        B.shots.push({ kind: u.type === 'heli' ? 'enemy-rocket' : 'enemy-shell', x: u.x, y: u.y - (u.air ? 30 : 0), sx: u.x, sy: u.y - (u.air ? 30 : 0), tx: hx, ty: hy, t: 0, dur, arc, dmg: e.dmg, bTarget: u.tgt, big: e.lob || e.boss });
+        B.shots.push({ kind: u.type === 'heli' ? 'enemy-rocket' : 'enemy-shell', x: u.x, y: u.y - (u.air ? 30 : 0), sx: u.x, sy: u.y - (u.air ? 30 : 0), tx: hx, ty: hy, t: 0, dur, arc, dmg: e.dmg * dmgMul, bTarget: u.tgt, big: e.lob || e.boss });
         if (e.lob || e.boss || u.type === 'tank') { Sound.play('cannon'); B.fx.push({ kind: 'light', x: u.x + Math.cos(u.aim) * 20, y: u.y + Math.sin(u.aim) * 20, r: 26, life: 0.1, max: 0.1 }); }
       } else {
-        damageBuilding(u.tgt, e.dmg);
+        damageBuilding(u.tgt, e.dmg * dmgMul);
         Sound.play('rifle');
         B.fx.push({ kind: 'tracer', x1: u.x, y1: u.y - (u.air ? 18 : 2), x2: hx, y2: hy, life: 0.07, color: '#ff9a6a' });
       }
@@ -484,7 +518,7 @@ function sapperBlast(u, e) {
   u.hp = 0;
   damageBuilding(u.tgt, e.dmg);
   for (const b of S.buildings) {
-    if (b._dead || b === u.tgt || DEFS[b.type].trap) continue;
+    if (b._dead || b === u.tgt || isPassive(b.type)) continue;
     if (distToBuilding(u.x, u.y, b) <= e.splash) damageBuilding(b, e.dmg * 0.5);
   }
   explosion(u.x, u.y, 34);
@@ -496,6 +530,7 @@ function damageEnemy(u, dmg, src) {
   const ed = ENEMIES[u.type];
   if (ed.armor) dmg = Math.max(dmg * 0.25, dmg - ed.armor);
   if (src) B.dmgBy[src] = (B.dmgBy[src] || 0) + Math.min(dmg, u.hp);
+  if (B.raid && ed.raidBoss) raidHit(u, Math.min(dmg, u.hp));
   u.hp -= dmg;
   u.hit = 0.1;
   if (dmg >= 120) floaters.push({ x: u.x + (Math.random() - 0.5) * 10, y: u.y - 24, text: String(Math.round(dmg)), color: '#ffe08a', life: 0.8, max: 0.8, size: dmg >= 400 ? 18 : 13 });
@@ -505,6 +540,26 @@ function damageEnemy(u, dmg, src) {
     if (B.hero) addHeroXP(B.hero.id, src === 'hero' ? 4 : 1);
     const e = ENEMIES[u.type];
     addXP(e.boss ? 40 : 1);
+    // veterancy: the defense that landed the killing blow remembers it
+    if (SHOOTER && !SHOOTER._dead) {
+      const before = vetRank(SHOOTER.kills);
+      SHOOTER.kills = (SHOOTER.kills || 0) + 1;
+      if (vetRank(SHOOTER.kills) > before) { const c = centerOf(SHOOTER); floaters.push({ x: c.x, y: c.y - 40, text: 'Promoted!', color: '#f2b632', life: 1.4, max: 1.4, size: 15 }); }
+    }
+    // kill streaks pay a bonus
+    B.streak++; B.streakT = 1.6;
+    if (B.streak === 5 || B.streak === 10 || B.streak === 20 || B.streak === 40) {
+      const bonus = B.streak * (5 + B.wave);
+      const got = addLoot('gold', bonus);
+      floaters.push({ x: cam.x, y: cam.y - 80, text: `${B.streak}-kill streak +${got}`, color: '#ffcf5a', life: 1.6, max: 1.6, size: 20 });
+      Sound.play('medal');
+    }
+    B.bestStreak = Math.max(B.bestStreak, B.streak);
+    if (u.elite) {
+      addLoot('gold', e.bounty * (ELITE.bounty - 1));
+      floaters.push({ x: u.x, y: u.y - 30, text: 'Elite down', color: '#f2b632', life: 1, max: 1, size: 13 });
+    }
+    if (e.raidBoss) { raidBossDown(u); return; }
     if (e.boss) {
       S.stats.bosses++; B.bosses++;
       explosion(u.x, u.y, 60); Sound.play('bigboom'); buzz([100, 50, 150]);
@@ -595,6 +650,10 @@ function weaponOf(b) {
   if (b.spec === 'rapid') w.fireRate *= 1.35;
   if (b.spec === 'heavy') w.dmg *= 1.45;
   if (b.spec === 'scope') w.range *= 1.25;
+  const vr = vetRank(b.kills);
+  if (vr) w.dmg *= 1 + VET_RANKS[vr - 1].bonus;
+  if (b._aura) { w.fireRate *= 1 + b._aura.rate; w.range *= 1 + b._aura.range; }
+  if (B && B.weather) w.range *= B.weather.range;
   return w;
 }
 
@@ -643,6 +702,8 @@ function updateDefense(b, dt) {
     B.fx.push({ kind: 'light', x: lc.x + Math.cos(Math.atan2(b._tgt.y - lc.y, b._tgt.x - lc.x)) * 22, y: lc.y - 8 + Math.sin(Math.atan2(b._tgt.y - lc.y, b._tgt.x - lc.x)) * 22, r: b.type === 'mg' || b.type === 'hq' ? 16 : 30, life: 0.07, max: 0.07 });
   }
   const mx = c.x + Math.cos(want) * 20, my = c.y - 8 + Math.sin(want) * 20;
+  SHOOTER = b;
+  const nShots = B.shots.length;
   switch (b.type) {
     case 'mg':
     case 'hq':
@@ -742,6 +803,38 @@ function updateDefense(b, dt) {
       break;
     }
   }
+  for (let i = nShots; i < B.shots.length; i++) B.shots[i].owner = b;
+  SHOOTER = null;
+}
+
+let SHOOTER = null; // the defense currently firing (credited with kills)
+
+function isPassive(type) { return !!(DEFS[type].trap || DEFS[type].deco); }
+
+function pickWeighted(list) {
+  const total = list.reduce((a, x) => a + x.weight, 0);
+  let r = Math.random() * total;
+  for (const x of list) { r -= x.weight; if (r <= 0) return x; }
+  return list[0];
+}
+
+// Ammo Bunkers and Radar Stations boost the defenses around them.
+function auraOf(b) {
+  const d = DEFS[b.type];
+  return d.auraBase + d.auraPer * (b.level - 1);
+}
+function computeAuras() {
+  const sources = S.buildings.filter(b => DEFS[b.type].aura && b.level >= 1 && !b._dead);
+  for (const b of S.buildings) {
+    if (!DEFS[b.type].dmg || isPassive(b.type)) { b._aura = null; continue; }
+    const a = { rate: 0, range: 0 };
+    const c = centerOf(b);
+    for (const s of sources) {
+      const sc = centerOf(s);
+      if (Math.hypot(sc.x - c.x, sc.y - c.y) <= DEFS[s.type].auraRange * TILE) a[DEFS[s.type].aura] = Math.max(a[DEFS[s.type].aura], auraOf(s));
+    }
+    b._aura = a;
+  }
 }
 
 // How far an enemy still has to go to reach the Command Center (smaller = more dangerous).
@@ -772,6 +865,7 @@ function segDist(px, py, x1, y1, x2, y2) {
 }
 
 function updateShot(p, dt) {
+  SHOOTER = p.owner || null;
   if (p.dur) {
     // time-based arcing / lobbed shot (a negative t means it has not launched yet)
     p.t += dt;
@@ -835,84 +929,27 @@ function splashDamage(x, y, radiusTiles, dmg, hitsAir, src) {
   }
 }
 
-/* ---------------- Abilities ---------------- */
+/* Abilities live in arsenal.js */
 
-function abilityReady(k) {
-  if (k === 'airstrike' && B && B.mods.noAirstrike) return false;
-  if (k === 'repair' && B && B.mods.noRepair) return false;
-  return B && !B.over && B.phase !== 'lost' && B.ab[k] <= 0;
-}
-
-function armAirstrike() {
-  if (!B) return;
-  if (B.mods.noAirstrike) { toast('No air support in this mission', 'bad'); Sound.play('error'); return; }
-  if (!abilityReady('airstrike')) { Sound.play('error'); return; }
-  B.targeting = !B.targeting;
-  document.body.classList.toggle('targeting', B.targeting);
-  Sound.play('click');
-  if (B.targeting) banner('Airstrike ready', 'Tap the map to mark the target');
-}
-
-// Taps on the map during battle: only used to aim the airstrike.
+// Taps on the map during battle: aim an ability, deploy troops, set a rally point, or move the hero.
 function battleTap(w) {
   if (!B) return;
-  if (!B.targeting) {
-    if (B.hero && !B.hero.dead) {
-      B.hero.dest = { x: clamp(w.x, TILE, (MAP_W - 1) * TILE), y: clamp(w.y, TILE, (MAP_H - 1) * TILE) };
-      Sound.play('click');
-    }
-    return;
+  if (B.targeting) { fireTargeted(B.targeting, w); return; }
+  if (B.deployPick) { deployAt(B.deployPick, w); return; }
+  if (B.rallyMode) { rallyTo(w); clearDeployPick(); return; }
+  if (B.hero && !B.hero.dead) {
+    B.hero.dest = { x: clamp(w.x, TILE, (MAP_W - 1) * TILE), y: clamp(w.y, TILE, (MAP_H - 1) * TILE) };
+    Sound.play('click');
   }
-  B.targeting = false;
-  document.body.classList.remove('targeting');
-  $('#banner').hidden = true;
-  B.ab.airstrike = Math.max(10, ABILITIES.airstrike.cooldown - 2 * researchLevel('airpower'));
-  S.stats.airstrikes++;
-  const a = -0.22;
-  B.planes.push({ tx: w.x, ty: w.y, a, t: 0, speed: 720, x: -9999, y: -9999, drops: [-90, -45, 0, 45, 90].map(o => ({ o, dropped: false })) });
-  B.fx.push({ kind: 'ring', x: w.x, y: w.y, r: 1.8 * TILE, life: 1.6, max: 1.6, color: '242,182,50' });
-  Sound.play('plane');
-}
-
-function updatePlane(pl, dt) {
-  pl.t += dt;
-  const along = pl.t * pl.speed - 1000;
-  const px = pl.x, py = pl.y;
-  pl.x = pl.tx + Math.cos(pl.a) * along;
-  pl.y = pl.ty + Math.sin(pl.a) * along;
-  for (const d of pl.drops) {
-    if (d.dropped || along < d.o - 70) continue;
-    d.dropped = true;
-    B.shots.push({
-      kind: 'bomb', sx: pl.x, sy: pl.y, x: pl.x, y: pl.y,
-      tx: pl.tx + Math.cos(pl.a) * d.o, ty: pl.ty + Math.sin(pl.a) * d.o,
-      t: 0, dur: 0.45, arc: 0, dmg: airstrikeDamage(B.wave) * (1 + researchBonus('airpower')), splash: 1.4, air: true, src: 'airstrike',
-    });
-  }
-  if (along > 1100) pl.done = true;
-  void px; void py;
-}
-
-function useRepair() {
-  if (!B) return;
-  if (B.mods.noRepair) { toast('No Field Repair in this battle', 'bad'); Sound.play('error'); return; }
-  if (!abilityReady('repair')) { Sound.play('error'); return; }
-  B.ab.repair = Math.max(15, ABILITIES.repair.cooldown - 3 * researchLevel('medicine'));
-  let n = 0;
-  for (const b of S.buildings) {
-    if (b._dead || DEFS[b.type].trap || b._hp >= b._maxhp) continue;
-    b._hp = Math.min(b._maxhp, b._hp + b._maxhp * (ABILITIES.repair.heal + researchBonus('medicine')));
-    b._heal = 1.2; n++;
-  }
-  Sound.play('heal');
-  toast(n ? `Field repair: ${n} building${n > 1 ? 's' : ''} patched up` : 'Field repair used. Nothing was damaged', 'good');
 }
 
 /* ---------------- Drawing ---------------- */
 
 function drawBattleGround(ctx) {
   if (!B) return;
+  drawSmokes(ctx);
   for (const u of B.units) if (!u.air) drawEnemy(ctx, u);
+  drawTroops(ctx);
   drawHero(ctx);
 }
 
@@ -985,7 +1022,7 @@ function drawBattleAir(ctx) {
   for (const pl of B.planes) drawJet(ctx, pl.x, pl.y, pl.a);
   // building health bars
   for (const b of S.buildings) {
-    if (b._dead || DEFS[b.type].trap || b._hp >= b._maxhp || b.type === 'wall' && b._hp > b._maxhp * 0.98) continue;
+    if (b._dead || isPassive(b.type) || b._hp >= b._maxhp || b.type === 'wall' && b._hp > b._maxhp * 0.98) continue;
     const n = DEFS[b.type].size * TILE;
     const w = Math.max(26, n * 0.7);
     const x = b.x * TILE + n / 2 - w / 2, y = b.y * TILE - (b.type === 'wall' ? 6 : 18);
@@ -1077,6 +1114,7 @@ function hullBox(ctx, L, W, color, white) {
 
 function drawVehicle(ctx, u, e, white) {
   const t = u.type;
+  if (t === 'behemoth') { drawBehemoth(ctx, u, e, white); return; }
   ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.beginPath(); ctx.ellipse(4, 5, e.r + 3, e.r * 0.75, u.angle, 0, Math.PI * 2); ctx.fill();
   ctx.save(); ctx.rotate(u.angle);
   const spin = u.walk * 2;
@@ -1205,19 +1243,26 @@ function renderEnemyPreview(type, px) {
 }
 
 function drawEnemyBar(ctx, u, e) {
+  if (u.elite) {
+    ctx.strokeStyle = `rgba(242,182,50,${0.6 + Math.sin(tSec * 6) * 0.3})`; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.ellipse(u.x, u.y + 2, e.r + 5, (e.r + 5) * 0.6, 0, 0, Math.PI * 2); ctx.stroke();
+  }
+  if (u.stun > 0) {
+    ctx.fillStyle = 'rgba(110,190,255,0.35)'; ctx.beginPath(); ctx.arc(u.x, u.y - (u.air ? 18 : 0), e.r + 4, 0, Math.PI * 2); ctx.fill();
+  }
   if (u.hit > 0) u.hit -= 1 / 60;
   if (u.healFx > 0) {
     ctx.strokeStyle = `rgba(140,230,120,${u.healFx * 2})`; ctx.lineWidth = 2;
     ctx.beginPath(); ctx.arc(u.x, u.y, e.r + 4, 0, Math.PI * 2); ctx.stroke();
   }
   if (u.hp < u.max || e.boss) {
-    const w = e.boss ? 60 : e.vehicle ? 26 : e.air ? 20 : 14, y = u.y - (u.air ? 34 : e.r + 10);
+    const w = e.raidBoss ? 100 : e.boss ? 60 : e.vehicle ? 26 : e.air ? 20 : 14, y = u.y - (u.air ? 34 : e.r + 10);
     const h = e.boss ? 5 : 2;
     ctx.fillStyle = 'rgba(16,18,12,0.8)'; ctx.fillRect(u.x - w / 2 - 1, y - 1, w + 2, h + 2);
     ctx.fillStyle = '#e0503a'; ctx.fillRect(u.x - w / 2, y, w * Math.max(0, u.hp / u.max), h);
     if (e.boss) {
       ctx.font = '10px "Black Ops One", Impact, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
-      ctx.fillStyle = '#f2b632'; ctx.fillText('SIEGE TANK', u.x, y - 2);
+      ctx.fillStyle = '#f2b632'; ctx.fillText(e.name.toUpperCase() + (u.elite ? ' (ELITE)' : ''), u.x, y - 2);
     }
   }
 }
@@ -1273,7 +1318,7 @@ function updateBattleHUD() {
   const status = B.phase === 'break'
     ? (B.wave === 0 ? `Enemy arrives in ${Math.ceil(B.breakT)}` : `Next wave in ${Math.ceil(B.breakT)}`)
     : `${left} hostile${left === 1 ? '' : 's'} left`;
-  setText($('#bh-status'), 'bs', status);
+  setText($('#bh-status'), 'bs', B.raid ? raidStatus() : status);
   const h = hq();
   const k = h && h._maxhp ? Math.max(0, h._hp / h._maxhp) : 1;
   const pct = (k * 100).toFixed(1);
@@ -1285,25 +1330,9 @@ function updateBattleHUD() {
     document.body.classList.toggle('hq-danger', k < 0.3 && k > 0);
   }
   setText($('#bh-kills'), 'bk', String(B.kills));
-  const heroBtn = $('#ab-hero');
-  heroBtn.hidden = !B.hero;
-  if (B.hero) {
-    const hcd = B.hero.dead ? B.hero.respawn : B.ab.hero;
-    setText(heroBtn.querySelector('.ab-cd'), 'abhero', hcd > 0 ? String(Math.ceil(hcd)) : '');
-    heroBtn.classList.toggle('cooling', hcd > 0);
-    heroBtn.style.setProperty('--p', hcd > 0 ? (Math.min(1, hcd / (B.hero.dead ? 15 : HEROES[B.hero.id].ability.cd)) * 100).toFixed(1) + '%' : '0%');
-    setText(heroBtn.querySelector('.ab-name'), 'abhn', HEROES[B.hero.id].ability.name.split(' ')[0]);
-  }
   updateNextWave();
-  for (const k of ['airstrike', 'repair']) {
-    const el = $(`#ab-${k}`);
-    const cd = B.ab[k], max = k === 'airstrike' ? Math.max(10, ABILITIES.airstrike.cooldown - 2 * researchLevel('airpower')) : Math.max(15, ABILITIES.repair.cooldown - 3 * researchLevel('medicine'));
-    const label = cd > 0 ? String(Math.ceil(cd)) : '';
-    setText(el.querySelector('.ab-cd'), 'ab' + k, label);
-    el.classList.toggle('cooling', cd > 0);
-    el.style.setProperty('--p', cd > 0 ? (cd / max * 100).toFixed(1) + '%' : '0%');
-    el.classList.toggle('armed', k === 'airstrike' && B.targeting);
-  }
+  updateAbilityBar();
+  updateDeployBar();
 }
 
 let retreatArmed = 0;
@@ -1344,9 +1373,8 @@ function callWaveEarly() {
 
 function initBattleUI() {
   $('#next-wave .nw-go').addEventListener('click', callWaveEarly);
-  $('#ab-hero').addEventListener('click', useHeroAbility);
-  $('#ab-airstrike').addEventListener('click', armAirstrike);
-  $('#ab-repair').addEventListener('click', useRepair);
+  $('#abilities').addEventListener('click', onAbilityClick);
+  $('#deploy-bar').addEventListener('click', onDeployClick);
   $('#btn-speed').addEventListener('click', () => {
     if (!B) return;
     B.speed = B.speed === 1 ? 2 : B.speed === 2 ? 3 : 1;
@@ -1366,7 +1394,7 @@ function initBattleUI() {
 /* ----- Screen shake ----- */
 let shakeAmt = 0;
 const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-function addShake(a) { if (!reduceMotion) shakeAmt = Math.min(10, shakeAmt + a); }
+function addShake(a) { if (!reduceMotion && !S.settings.lowfx) shakeAmt = Math.min(10, shakeAmt + a); }
 function shakeOffset(dt) {
   if (shakeAmt <= 0.05) { shakeAmt = 0; return { x: 0, y: 0 }; }
   shakeAmt *= Math.pow(0.02, dt);
@@ -1378,8 +1406,8 @@ function openFieldGuide(back) {
   const types = Object.keys(ENEMIES).sort((a, b) => firstWaveOf(a) - firstWaveOf(b));
   const best = S.bestWave || 0;
   const cards = types.map(t => {
-    const e = ENEMIES[t], w = isBossWave(5) && e.boss ? 5 : firstWaveOf(t);
-    const known = w <= best + 1;
+    const e = ENEMIES[t], w = firstWaveOf(t);
+    const known = e.raidBoss ? (S.stats.raidKills > 0 || (S.raid && S.raid.best > 0)) : w <= best + 1;
     const tags = [];
     if (e.air) tags.push('Air');
     else if (e.vehicle) tags.push('Vehicle');
@@ -1394,7 +1422,7 @@ function openFieldGuide(back) {
         <div class="intel-art" data-type="${t}"></div>
         <div class="intel-body">
           <div class="intel-name">${known ? e.name : 'Unknown contact'}</div>
-          <div class="intel-tags">${tags.map(x => `<span>${x}</span>`).join('')}<span class="intel-wave">Wave ${w}+</span></div>
+          <div class="intel-tags">${tags.map(x => `<span>${x}</span>`).join('')}<span class="intel-wave">${e.raidBoss ? 'Boss raid' : `Wave ${w}+`}</span></div>
           <div class="intel-note">${known ? ENEMY_NOTES[t] : 'Survive longer to gather intel on this unit.'}</div>
           ${known ? `<div class="intel-stats"><span>HP ${e.hp}</span><span>Speed ${e.speed}</span><span>Range ${e.range}</span></div>` : ''}
         </div>
@@ -1409,4 +1437,35 @@ function openFieldGuide(back) {
   $('#modal-body').querySelectorAll('.intel-art').forEach(el => el.appendChild(renderEnemyPreview(el.dataset.type, 56)));
   const bb = $('#btn-guide-back');
   if (bb) bb.addEventListener('click', () => { closeModal(); $('#btn-battle').click(); });
+}
+
+/* ----- The Behemoth: a four-legged walking fortress (raid boss) ----- */
+function drawBehemoth(ctx, u, e, white) {
+  const step = u.walk * 1.4;
+  ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.beginPath(); ctx.ellipse(10, 14, 46, 30, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.save(); ctx.rotate(u.angle);
+  // legs
+  for (const [lx, ly, ph] of [[18, -26, 0], [18, 26, Math.PI], [-18, -26, Math.PI], [-18, 26, 0]]) {
+    const off = u.moving ? Math.sin(step + ph) * 8 : 0;
+    ctx.strokeStyle = '#2a221d'; ctx.lineWidth = 7; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(lx * 0.5, ly * 0.45); ctx.lineTo(lx + off, ly); ctx.stroke();
+    ctx.fillStyle = '#1b1612'; ctx.beginPath(); ctx.ellipse(lx + off, ly, 7, 5, 0, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.lineCap = 'butt';
+  // hull
+  ctx.fillStyle = white ? '#fff' : '#4a3328'; rr(ctx, -30, -22, 60, 44, 10); ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.1)'; rr(ctx, -26, -19, 52, 12, 6); ctx.fill();
+  ctx.fillStyle = '#c8402a'; ctx.fillRect(-30, -4, 60, 4);
+  // armor plates and vents
+  ctx.fillStyle = '#35241c'; for (let i = 0; i < 4; i++) rr(ctx, -24 + i * 13, 8, 9, 10, 2), ctx.fill();
+  const glow = 0.5 + Math.sin(tSec * 4) * 0.3 + (u.rage || 0) * 0.3;
+  ctx.fillStyle = `rgba(255,${120 - (u.rage || 0) * 40},40,${glow})`; ctx.beginPath(); ctx.arc(-22, -12, 3.5, 0, Math.PI * 2); ctx.arc(-22, 12, 3.5, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+  // main twin cannon turret aims independently
+  ctx.rotate(u.aim);
+  ctx.fillStyle = '#1e1813'; ctx.fillRect(10, -10, 40, 7); ctx.fillRect(10, 3, 40, 7);
+  ctx.fillStyle = white ? '#fff' : '#5a3f31'; ctx.beginPath(); ctx.arc(0, 0, 17, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.12)'; ctx.beginPath(); ctx.arc(-4, -4, 9, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#ff5a3c'; ctx.beginPath(); ctx.arc(6, 0, 3, 0, Math.PI * 2); ctx.fill();
+  if (u.flash > 0) { ctx.fillStyle = '#ffd36b'; ctx.beginPath(); ctx.arc(53, -6.5, 8, 0, Math.PI * 2); ctx.arc(53, 6.5, 8, 0, Math.PI * 2); ctx.fill(); }
 }
