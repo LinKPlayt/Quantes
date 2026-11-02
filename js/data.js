@@ -34,6 +34,14 @@ const LIMITS = {
   radio:      [0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
   statue:     [0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1],
   camonet:    [0, 0, 0, 2, 2, 2, 3, 3, 3, 4, 4, 4, 4],
+  guardpost:  [0, 0, 0, 0, 1, 1, 2, 2, 2, 3, 3, 3, 3],
+  workshop:   [0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+  derrick:    [0, 0, 0, 0, 0, 1, 2, 2, 3, 3, 4, 4, 4],
+  watchtower: [0, 0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+  gate:       [0, 1, 2, 2, 3, 3, 4, 4, 4, 5, 5, 5, 6],
+  snowtank:   [0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+  monument:   [0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+  goldtank:   [0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
   depot:      [0, 1, 1, 2, 2, 2, 3, 3, 4, 4, 5, 5, 6],
   mg:         [0, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7],
   cannon:     [0, 0, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6],
@@ -258,6 +266,48 @@ const DEFS = {
   radio:       { name: 'Radio Mast', code: 'RM', cat: 'deco', size: 1, max: 1, deco: true, desc: 'A tall mast with a blinking beacon.', cost: { base: { gold: 900, steel: 400 }, growth: 1 }, time: { base: 0, growth: 1 }, hp: { base: 1, growth: 1 } },
   camonet:     { name: 'Camo Net', code: 'CN', cat: 'deco', size: 2, max: 1, deco: true, desc: 'Camouflage netting over supply crates.', cost: { base: { gold: 700 }, growth: 1 }, time: { base: 0, growth: 1 }, hp: { base: 1, growth: 1 } },
   statue:      { name: 'Hero Statue', code: 'HS', cat: 'deco', size: 2, max: 1, deco: true, desc: 'A bronze monument to your victories.', cost: { base: { gold: 8000 }, growth: 1 }, time: { base: 0, growth: 1 }, hp: { base: 1, growth: 1 } },
+  guardpost: {
+    name: 'Guard Post', code: 'GP', cat: 'support', size: 2, max: MAX_LEVEL,
+    desc: 'A garrison of free soldiers that rush out when enemies come close. Higher levels send more and better troops.',
+    cost: { base: { gold: 2000, steel: 1500 }, growth: 1.6 },
+    time: { base: 60, growth: 1.7 },
+    hp: { base: 900, growth: 1.25 },
+  },
+  workshop: {
+    name: 'Workshop', code: 'WS', cat: 'support', size: 2, max: MAX_LEVEL,
+    desc: 'Crafts battle consumables: mine refills, med kits, overdrive charges and more. Higher levels craft faster and carry more.',
+    cost: { base: { gold: 1800, steel: 1800 }, growth: 1.65 },
+    time: { base: 60, growth: 1.7 },
+    hp: { base: 700, growth: 1.25 },
+  },
+  derrick: {
+    name: 'Oil Derrick', code: 'OD', cat: 'economy', size: 2, max: MAX_LEVEL,
+    desc: 'Pumps oil, needed for vehicles, helicopters and the highest upgrade levels.',
+    cost: { base: { gold: 3000, steel: 2500 }, growth: 1.7 },
+    time: { base: 90, growth: 1.7 },
+    hp: { base: 600, growth: 1.25 },
+    produces: 'oil',
+    rate: { base: 8, growth: 1.4 },
+    hold: { base: 150, growth: 1.7 },
+  },
+  watchtower: {
+    name: 'Watchtower', code: 'WT', cat: 'walls', size: 1, max: MAX_LEVEL,
+    desc: 'A one-tile tower with a marksman. Place it in your wall lines.',
+    cost: { base: { gold: 300, steel: 250 }, growth: 1.75 },
+    time: { base: 0, growth: 1 },
+    hp: { base: 500, growth: 1.5 },
+    dmg: { base: 30, growth: 1.3 }, fireRate: 0.8, range: 5.5, targets: 'both',
+  },
+  gate: {
+    name: 'Gate', code: 'GT', cat: 'walls', size: 1, max: MAX_LEVEL, gate: true,
+    desc: 'Twice as tough as a wall. Your troops walk through it; enemies have to break it.',
+    cost: { base: { steel: 120 }, growth: 2.0 },
+    time: { base: 0, growth: 1 },
+    hp: { base: 600, growth: 1.55 },
+  },
+  snowtank:    { name: 'Snow Tank', code: 'ST', cat: 'deco', size: 2, max: 1, deco: true, event: true, desc: 'Event decoration: a tank built of snow.', cost: { base: { gold: 0 }, growth: 1 }, time: { base: 0, growth: 1 }, hp: { base: 1, growth: 1 } },
+  monument:    { name: 'Victory Arch', code: 'VA', cat: 'deco', size: 2, max: 1, deco: true, event: true, desc: 'Event decoration: a triumphal arch.', cost: { base: { gold: 0 }, growth: 1 }, time: { base: 0, growth: 1 }, hp: { base: 1, growth: 1 } },
+  goldtank:    { name: 'Golden Tank', code: 'GK', cat: 'deco', size: 2, max: 1, deco: true, event: true, desc: 'Event decoration: a tank plated in gold.', cost: { base: { gold: 0 }, growth: 1 }, time: { base: 0, growth: 1 }, hp: { base: 1, growth: 1 } },
   wall: {
     name: 'Wall', code: 'WL', cat: 'walls', size: 1, max: MAX_LEVEL,
     desc: 'Blocks the enemy path. Place several in a row; they link together.',
@@ -276,10 +326,14 @@ function grow(spec, L) {
 
 function costFor(type, L) {
   const d = DEFS[type];
-  if (d.costTable) return { gold: d.costTable[L].gold || 0, steel: d.costTable[L].steel || 0 };
+  // the top levels (9+) also cost oil
+  const oilFor = c => (L >= 9 && !d.deco ? Math.round((c.gold + c.steel) * 0.12 / 10) * 10 : 0);
+  if (d.costTable) { const c = { gold: d.costTable[L].gold || 0, steel: d.costTable[L].steel || 0 }; c.oil = oilFor(c); return c; }
   const m = Math.pow(d.cost.growth, L - 1);
   const r = v => (v ? Math.round((v * m) / 5) * 5 : 0);
-  return { gold: r(d.cost.base.gold), steel: r(d.cost.base.steel) };
+  const c = { gold: r(d.cost.base.gold), steel: r(d.cost.base.steel) };
+  c.oil = oilFor(c);
+  return c;
 }
 
 function timeFor(type, L) {
@@ -348,6 +402,11 @@ const ENEMIES = {
   heavy:     { name: 'Heavy Gunner', hp: 260, speed: 0.6,  dmg: 6,  rate: 4.0,  range: 2.6, bounty: 18, r: 9, armor: 8 },
   heli:      { name: 'Gunship',      hp: 650, speed: 1.1,  dmg: 45, rate: 0.7,  range: 3.2, splash: 0.6, bounty: 45, r: 16, air: true },
   artillery: { name: 'Artillery Truck', hp: 420, speed: 0.5, dmg: 70, rate: 0.25, range: 6.5, splash: 0.9, bounty: 35, r: 12, vehicle: true, lob: true },
+  bulldozer: { name: 'Bulldozer', hp: 900, speed: 0.6, dmg: 40, rate: 1.0, range: 0.9, bounty: 30, r: 14, vehicle: true, wallBreaker: 5 },
+  stealth:   { name: 'Stealth Commando', hp: 160, speed: 1.3, dmg: 14, rate: 1.2, range: 2.2, bounty: 14, r: 6, stealth: true },
+  jammer:    { name: 'Jammer Truck', hp: 600, speed: 0.75, dmg: 35, rate: 1, range: 1.5, bounty: 30, r: 12, vehicle: true, jam: 4 },
+  supply:    { name: 'Supply Truck', hp: 500, speed: 0.8, dmg: 35, rate: 1, range: 1.5, bounty: 25, r: 12, vehicle: true, supplyAura: 3 },
+  skyfortress: { name: 'Sky Fortress', hp: 12000, speed: 0.28, dmg: 160, rate: 0.5, range: 2.6, splash: 1.5, bounty: 800, r: 36, air: true, boss: true, raidBoss: true },
   behemoth:  { name: 'Behemoth', hp: 12000, speed: 0.32, dmg: 200, rate: 0.45, range: 3.5, splash: 1.4, bounty: 800, r: 32, vehicle: true, boss: true, raidBoss: true },
   siege:     { name: 'Siege Tank',   hp: 2600, speed: 0.38, dmg: 130, rate: 0.3, range: 4.5, splash: 1.0, bounty: 220, r: 20, vehicle: true, boss: true },
 };
@@ -371,6 +430,10 @@ function waveComposition(n) {
   if (n >= 8) list.push({ type: 'heavy', count: Math.floor((n - 6) / 2) });
   if (n >= 9) list.push({ type: 'heli', count: Math.floor((n - 6) / 3) });
   if (n >= 10) list.push({ type: 'artillery', count: Math.floor((n - 7) / 3) });
+  if (n >= 11) list.push({ type: 'bulldozer', count: Math.floor((n - 9) / 3) });
+  if (n >= 12) list.push({ type: 'stealth', count: Math.floor((n - 10) / 2) });
+  if (n >= 13) list.push({ type: 'supply', count: Math.floor((n - 11) / 4) + 1 });
+  if (n >= 14) list.push({ type: 'jammer', count: Math.floor((n - 12) / 5) + 1 });
   if (isBossWave(n)) list.push({ type: 'siege', count: 1 + Math.floor(n / 15) });
   return list;
 }
@@ -385,6 +448,11 @@ function firstWaveOf(type) {
 
 // One-line field notes for the enemy guide.
 const ENEMY_NOTES = {
+  bulldozer: 'Armored plow that smashes walls five times faster than anything else.',
+  stealth: 'Invisible to your defenses until it gets close to one, or a Radar Station spots it.',
+  jammer: 'Scrambles your radios: abilities aimed near it fail.',
+  supply: 'Heals and speeds up the enemies around it.',
+  skyfortress: 'Raid boss. A flying fortress: only anti-air weapons can touch it.',
   rifleman: 'Basic infantry. Comes in numbers.',
   grenadier: 'Throws grenades that splash nearby buildings.',
   jeep: 'Fast armored car with a mounted gun.',
@@ -589,6 +657,13 @@ const HEROES = {
     ability: { name: 'Rocket Strike', cd: 26, desc: 'Fires a heavy rocket that wrecks vehicles.', dmg: 700, radius: 1.2 },
     bio: 'Slow tank of a soldier with a rocket launcher. Unlocks at Command Center 6.',
   },
+  droneop: {
+    name: 'Spc. Ryo', title: 'Drone Operator', color: '#3f5a6a', unlock: { hq: 5 },
+    hp: 380, speed: 1.6, dmg: 8, rate: 3, range: 3.2, regen: 5,
+    ability: { name: 'Drone Swarm', cd: 26, desc: 'Launches four extra attack drones for 12 seconds.', dmg: 9, life: 12 },
+    drone: { dmg: 11, rate: 3, range: 4 },
+    bio: 'Controls an attack drone that hits air and ground. Unlocks at Command Center 5.',
+  },
 };
 const HERO_MAX = 10;
 function heroXpFor(L) { return 80 * L * L; } // xp needed to go from L to L+1
@@ -629,7 +704,15 @@ const TROOPS = {
     desc: 'Rockets deal double damage to vehicles and can hit aircraft.' },
   sniper: { name: 'Marksman', hp: 140, dmg: 120, rate: 0.5, range: 6.5, speed: 1.1, space: 3, time: 60, cost: { gold: 280 }, unlock: 5, r: 6, color: '#3f4a27',
     desc: 'Very long range, picks off dangerous targets.' },
-  tank:   { name: 'Battle Tank', hp: 1600, dmg: 95, rate: 0.6, range: 4.4, speed: 0.8, space: 10, time: 180, cost: { gold: 1000, steel: 700 }, unlock: 7, r: 14, color: '#4f6a32', vehicle: true, splash: 0.8,
+  flame:  { name: 'Flame Squad', hp: 260, dmg: 10, rate: 5, range: 2, speed: 1.1, space: 3, time: 45, cost: { gold: 240 }, unlock: 3, r: 7, color: '#6a5232', splash: 1.0,
+    desc: 'Short-range flamethrowers that burn groups of infantry.' },
+  engineer: { name: 'Combat Engineer', hp: 220, dmg: 6, rate: 1.5, range: 2.4, speed: 1.2, space: 2, time: 40, cost: { gold: 200, steel: 100 }, unlock: 4, r: 6, color: '#b8682a', repair: 30,
+    desc: 'Repairs damaged walls and buildings nearby while under fire.' },
+  mortarteam: { name: 'Mortar Team', hp: 180, dmg: 60, rate: 0.35, range: 7, minRange: 2, speed: 0.9, space: 4, time: 70, cost: { gold: 350, steel: 150 }, unlock: 6, r: 7, color: '#4f5a2f', splash: 1.2, lob: true,
+    desc: 'Lobs shells over walls from long range. Cannot hit enemies right next to it.' },
+  heli:   { name: 'Attack Helicopter', hp: 900, dmg: 40, rate: 1.2, range: 4.2, speed: 1.8, space: 8, time: 160, cost: { gold: 1200, steel: 600, oil: 200 }, unlock: 8, r: 16, color: '#4f6a32', flying: true, air: true,
+    desc: 'Your first air unit. Fast, hits ground and air with rockets. Needs oil.' },
+  tank:   { name: 'Battle Tank', hp: 1600, dmg: 95, rate: 0.6, range: 4.4, speed: 0.8, space: 10, time: 180, cost: { gold: 1000, steel: 700, oil: 120 }, unlock: 7, r: 14, color: '#4f6a32', vehicle: true, splash: 0.8,
     desc: 'Heavy armor and a big gun. Takes a lot of room.' },
 };
 function barracksCapacity(L) { return L > 0 ? 10 + (L - 1) * 6 : 0; }
@@ -716,3 +799,135 @@ const THEMES = {
 };
 
 const UPDATE_VERSION = '1.0';
+
+/* =================== Update 2: Iron Front =================== */
+
+// Armory: per-troop upgrades (level 1-5), capped by the Barracks level.
+const ARMORY_MAX = 5;
+function armoryCost(t, L) { const base = (TROOPS[t].cost.gold || 0) + (TROOPS[t].cost.steel || 0); return { gold: 0, steel: Math.round(base * 6 * Math.pow(2, L - 1) / 10) * 10, oil: L >= 4 ? Math.round(base * 0.5 * L / 10) * 10 : 0 }; }
+function armoryBonus(L) { return 1 + 0.15 * ((L || 1) - 1); }
+
+// Troop stances, switched in battle.
+const STANCES = [
+  { id: 'hold', name: 'Hold', leash: 1.5, desc: 'Stay close to the post' },
+  { id: 'aggressive', name: 'Attack', leash: 99, desc: 'Hunt any enemy in sight' },
+  { id: 'guard', name: 'Guard hero', leash: 3, desc: 'Follow and protect the hero' },
+];
+
+// Hero skill trees: one point per level, max 5 per branch.
+const SKILL_BRANCHES = [
+  { id: 'off', name: 'Firepower', desc: '+8% damage per point', per: 0.08 },
+  { id: 'surv', name: 'Toughness', desc: '+10% health and regeneration per point', per: 0.10 },
+  { id: 'abil', name: 'Tactics', desc: '-8% ability cooldown and +10% ability damage per point', per: 0.08 },
+];
+const SKILL_MAX = 5;
+
+// Hero gear: drops from raids, three-star campaign wins and daily challenges.
+const GEAR_SLOTS = { weapon: 'Weapon', armor: 'Armor', charm: 'Charm' };
+const GEAR_TIERS = [
+  { id: 'common', name: 'Standard', mult: 1, color: '#a6a58a' },
+  { id: 'rare', name: 'Veteran', mult: 1.8, color: '#6ec0ff' },
+  { id: 'epic', name: 'Legendary', mult: 2.8, color: '#f2b632' },
+];
+const GEAR_NAMES = {
+  weapon: ['Rifle Scope', 'Extended Mag', 'Tungsten Rounds', 'Gyro Stabilizer'],
+  armor: ['Kevlar Vest', 'Ceramic Plates', 'Blast Liner', 'Ghillie Suit'],
+  charm: ['Lucky Coin', 'Dog Tags', 'Field Radio', 'Old Compass'],
+};
+const GEAR_STAT = { weapon: { key: 'dmg', base: 0.06, label: 'damage' }, armor: { key: 'hp', base: 0.08, label: 'health' }, charm: { key: 'cd', base: 0.05, label: 'faster ability' } };
+
+// Endless-mode wave upgrades: pick one of three every five waves.
+const WAVE_CARDS = [
+  { id: 'dmg', name: 'Hot Barrels', desc: '+15% damage for every defense', apply: b => { b.dmgAll += 0.15; } },
+  { id: 'rate', name: 'Ammo Belts', desc: '+12% fire rate for every defense', apply: b => { b.rate += 0.12; } },
+  { id: 'range', name: 'Spotters', desc: '+10% range for every defense', apply: b => { b.range += 0.10; } },
+  { id: 'troops', name: 'Battle Drills', desc: '+30% troop damage and health', apply: b => { b.troops += 0.3; } },
+  { id: 'hero', name: 'Hero\'s Resolve', desc: '+40% hero damage', apply: b => { b.hero += 0.4; } },
+  { id: 'loot', name: 'Plunder', desc: '+40% gold from kills', apply: b => { b.loot += 0.4; } },
+  { id: 'cd', name: 'Fast Turnaround', desc: 'Abilities recharge 25% faster', apply: b => { b.cd *= 0.75; } },
+  { id: 'repair', name: 'Field Engineers', desc: 'Repair every building by 50% now', now: 'repair' },
+  { id: 'mines', name: 'Re-arm Mines', desc: 'All used land mines re-arm now', now: 'mines' },
+  { id: 'walls', name: 'Sandbag Reinforcement', desc: '+60% wall and gate health', now: 'walls' },
+  { id: 'reinforce', name: 'Free Platoon', desc: 'Six free rifle squads join the fight now', now: 'platoon' },
+  { id: 'cannon', name: 'Heavy Shells', desc: '+35% Cannon, Mortar and Howitzer damage', apply: b => { b.dmgType.cannon = (b.dmgType.cannon || 0) + 0.35; b.dmgType.mortar = (b.dmgType.mortar || 0) + 0.35; b.dmgType.howitzer = (b.dmgType.howitzer || 0) + 0.35; } },
+  { id: 'aa', name: 'Flak Doctrine', desc: '+40% damage against air units', apply: b => { b.antiAir += 0.4; } },
+];
+
+// Enemy factions rotate every week in endless battles.
+const FACTIONS = [
+  { id: 'legion', name: 'Iron Legion', commander: 'General Kroll', color: '#6b4a3a', rule: 'Vehicles have 40% more health', vehHp: 1.4 },
+  { id: 'hawks', name: 'Red Hawks', commander: 'Air Marshal Vey', color: '#a8402a', rule: 'Twice as many drones and gunships, which fly 20% faster', airMul: 2, airSpeed: 1.2 },
+  { id: 'swarm', name: 'Black Swarm', commander: 'The Hive', color: '#2e2c29', rule: '50% more infantry, each a little weaker', infMul: 1.5, infHp: 0.8 },
+  { id: 'corps', name: 'Sapper Corps', commander: 'Major Dunn', color: '#8a6a3a', rule: 'Triple sappers and early bulldozers', sapperMul: 3, earlyDozers: true },
+];
+
+// Surprise attacks while you are away.
+const SURPRISE = { minAway: 2 * 3600 * 1000, cooldown: 6 * 3600 * 1000, chance: 0.7 };
+
+// World map: outposts you can capture for passive income.
+const OUTPOSTS = [
+  { id: 'o1', name: 'Pine Ridge', x: 18, y: 62, level: 2, hq: 2, income: { gold: 120 } },
+  { id: 'o2', name: 'Old Quarry', x: 34, y: 30, level: 4, hq: 3, income: { steel: 120 } },
+  { id: 'o3', name: 'Radio Hill', x: 50, y: 70, level: 6, hq: 4, income: { gold: 220, steel: 120 } },
+  { id: 'o4', name: 'Dry Creek Depot', x: 60, y: 38, level: 8, hq: 5, income: { steel: 260 } },
+  { id: 'o5', name: 'Oil Flats', x: 76, y: 66, level: 10, hq: 6, income: { oil: 60 } },
+  { id: 'o6', name: 'Iron Pass', x: 82, y: 24, level: 13, hq: 7, income: { gold: 450, steel: 300 } },
+  { id: 'o7', name: 'Fort Ashen', x: 92, y: 50, level: 16, hq: 8, income: { gold: 600, steel: 450, oil: 80 } },
+];
+
+// Workshop consumables, used from the deploy bar in battle.
+const ITEMS = {
+  minekit:  { name: 'Mine Refill', desc: 'Re-arms every land mine', cost: { steel: 400 }, time: 120, hq: 3 },
+  medkit:   { name: 'Med Kit', desc: 'Heals your troops and hero by 60%', cost: { gold: 500 }, time: 120, hq: 3 },
+  overdrive:{ name: 'Overdrive', desc: 'Defenses fire 50% faster for 15 seconds', cost: { gold: 600, steel: 600 }, time: 240, hq: 4 },
+  sandbags: { name: 'Sandbag Drop', desc: 'Repairs every wall and gate by 50%', cost: { steel: 700 }, time: 180, hq: 3 },
+  smokepot: { name: 'Smoke Charge', desc: 'A smoke cloud at your Command Center', cost: { gold: 300, steel: 300 }, time: 150, hq: 4 },
+  fuelbomb: { name: 'Fuel Bomb', desc: 'Huge explosion where you tap', cost: { steel: 500, oil: 120 }, time: 300, hq: 5 },
+};
+function itemCap(wsLevel) { return 1 + Math.floor((wsLevel || 0) / 2); }
+
+// Daily orders: three small goals every day.
+const ORDER_TYPES = [
+  { id: 'kill', text: n => `Destroy ${n} enemies`, n: [60, 120, 200], reward: 3 },
+  { id: 'killair', text: n => `Shoot down ${n} aircraft`, n: [5, 10, 20], reward: 4 },
+  { id: 'killveh', text: n => `Destroy ${n} vehicles`, n: [8, 15, 25], reward: 4 },
+  { id: 'waves', text: n => `Clear ${n} waves`, n: [5, 10, 15], reward: 3 },
+  { id: 'train', text: n => `Train ${n} troops`, n: [10, 20, 40], reward: 3 },
+  { id: 'deploy', text: n => `Deploy ${n} troops in battle`, n: [8, 16, 30], reward: 3 },
+  { id: 'ability', text: n => `Use abilities ${n} times`, n: [4, 8, 12], reward: 3 },
+  { id: 'collect', text: n => `Collect ${n} gold from mines`, n: [1000, 3000, 8000], reward: 2 },
+  { id: 'upgrade', text: n => `Finish ${n} upgrades`, n: [2, 4, 6], reward: 3 },
+  { id: 'mission', text: () => 'Win a campaign mission, daily challenge or raid', n: [1, 1, 1], reward: 5 },
+];
+
+// Monthly event: a new theme each month with its own token shop.
+const EVENTS = [
+  { name: 'Winter Offensive', color: '#9fd0e8', shop: ['snowtank', 'skin:arctic', 'flag:white'] },
+  { name: 'Operation Harvest', color: '#e0763a', shop: ['monument', 'skin:desert', 'flag:orange'] },
+  { name: 'Golden Jubilee', color: '#f2b632', shop: ['goldtank', 'skin:gold', 'flag:gold'] },
+];
+const EVENT_PRICES = { deco: 120, skin: 200, flag: 60, medals: 30 };
+
+// Cosmetics: Command Center skins, flag colors, troop camo.
+const HQ_SKINS = {
+  classic: { name: 'Classic', roof: null, price: 0 },
+  desert: { name: 'Desert Camo', roof: '#9c8657', price: 40 },
+  arctic: { name: 'Arctic', roof: '#b8c4cc', price: 40 },
+  night: { name: 'Night Ops', roof: '#2a2e33', price: 60 },
+  gold: { name: 'Gilded', roof: '#b88a1c', price: 150 },
+};
+const FLAGS = {
+  red: { name: 'Red', color: '#c8402a', price: 0 },
+  green: { name: 'Green', color: '#55703a', price: 15 },
+  blue: { name: 'Blue', color: '#3f6fa8', price: 15 },
+  white: { name: 'White', color: '#e9e4d4', price: 25 },
+  orange: { name: 'Orange', color: '#e0763a', price: 25 },
+  gold: { name: 'Gold', color: '#f2b632', price: 40 },
+};
+const CAMO = {
+  standard: { name: 'Woodland', color: null, price: 0 },
+  desert: { name: 'Desert', color: '#8f7448', price: 30 },
+  urban: { name: 'Urban', color: '#6b6f74', price: 30 },
+  tiger: { name: 'Tiger Stripe', color: '#4a5a2a', price: 45 },
+};
+const UPDATE2_VERSION = '2.0';

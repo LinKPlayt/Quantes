@@ -19,13 +19,17 @@ function raidBossHp() { return Math.round(4000 * Math.pow(1.45, hqLevel() - 1) *
 function raidBossDmgK() { return 0.3 + 0.1 * hqLevel(); }
 function raidTier(frac) { let n = 0; for (const t of RAID.tiers) if (frac >= t - 1e-9) n++; return n; }
 
+// The raid boss alternates weekly between the Behemoth and the Sky Fortress.
+function raidBossType() { return +weekKey().split('-W')[1] % 2 ? 'skyfortress' : 'behemoth'; }
 function makeRaid() {
-  const L = hqLevel();
+  const L = hqLevel(), boss = raidBossType(), sky = boss === 'skyfortress';
   return {
-    id: 'raid', raid: true, name: 'Boss Raid: Behemoth', hq: L, level: Math.max(1, L * 2), gates: ['w', 'e'],
+    id: 'raid', raid: true, boss, name: `Boss Raid: ${ENEMIES[boss].name}`, hq: L, level: Math.max(1, L * 2), gates: sky ? ['n', 'w', 'e'] : ['w', 'e'],
     mods: {},
-    brief: `The Behemoth, a four-legged walking fortress, is marching on your base. You have ${RAID.timeLimit} seconds. Every point of damage counts toward this week's reward tiers.`,
-    waves: [[{ type: 'behemoth', count: 1 }, { type: 'rifleman', count: 6 + L }, { type: 'jeep', count: Math.floor(L / 2) }]],
+    brief: sky
+      ? `The Sky Fortress, a flying battleship, is heading for your base. Only anti-air weapons can hit it: Machine Gun Nests, Sniper Towers, Missile Batteries, Tesla Coils, Flak Cannons, Laser Towers, Watchtowers and anti-air troops. ${RAID.timeLimit} seconds.`
+      : `The Behemoth, a four-legged walking fortress, is marching on your base. You have ${RAID.timeLimit} seconds. Every point of damage counts toward this week's reward tiers.`,
+    waves: [[{ type: boss, count: 1 }, ...(sky ? [{ type: 'drone', count: 4 + L }] : [{ type: 'rifleman', count: 6 + L }, { type: 'jeep', count: Math.floor(L / 2) }])]],
     reward: { medals: 0 },
   };
 }
@@ -53,7 +57,7 @@ function raidHit(u, dmg) {
     banner(phase === 1 ? 'The Behemoth is angry' : 'The Behemoth is enraged', 'Escorts incoming');
     Sound.play('boss'); buzz([80, 60, 80]);
     const L = hqLevel();
-    const add = phase === 1 ? [['rifleman', 6], ['grenadier', 2], ['jeep', 1]] : [['heavy', 2], ['apc', 1], ['tank', 1]];
+    const add = u.type === 'skyfortress' ? (phase === 1 ? [['drone', 6]] : [['drone', 6], ['heli', 2]]) : phase === 1 ? [['rifleman', 6], ['grenadier', 2], ['jeep', 1]] : [['heavy', 2], ['apc', 1], ['tank', 1]];
     for (const [type, n] of add) {
       for (let i = 0; i < n; i++) {
         const a = Math.random() * Math.PI * 2;
@@ -71,7 +75,7 @@ function raidBossDown(u) {
   explosion(u.x, u.y, 90); explosion(u.x + 30, u.y - 20, 50); explosion(u.x - 25, u.y + 20, 50);
   Sound.play('bigboom'); buzz([150, 60, 200]);
   addShake(10);
-  banner('Behemoth destroyed', 'Outstanding work, Commander');
+  banner(`${ENEMIES[u.type].name} destroyed`, 'Outstanding work, Commander');
   B.phase = 'won';
   setTimeout(() => endBattle('victory'), 1600);
 }
@@ -86,13 +90,16 @@ function endRaid(reason) {
   const cap = storageCap();
   const res = tier > prevTier ? Math.round(cap * 0.08 * (tier - prevTier) / 10) * 10 : 0;
   S.medals += medals;
+  if (tier > prevTier) { const g = dropGear(tier >= 4 ? 2 : tier >= 2 ? 1 : 0); setTimeout(() => toast(`Gear found: ${g.name}`, 'good'), 600); }
+  if (tier > 0) orderEvent('mission', 1);
+  eventTokens(tier * 4);
   S.gold = Math.min(cap, S.gold + res); S.steel = Math.min(cap, S.steel + res);
   st.best = Math.max(st.best, frac);
   B.battleStars += tier * 3;
   save();
   Sound.play(tier ? 'win' : 'lose');
   const tiers = RAID.tiers.map((t, i) => `<div class="rt ${frac >= t - 1e-9 ? 'hit' : ''} ${i < prevTier ? 'old' : ''}"><b>${Math.round(t * 100)}%</b><span>${ICON.medal}${RAID.tierMedals[i]}</span></div>`).join('');
-  const title = R.killed ? 'Behemoth destroyed' : reason === 'retreat' ? 'Raid aborted' : reason === 'timeup' ? 'Time is up' : 'Base overrun';
+  const title = R.killed ? `${ENEMIES[B.mission.boss || 'behemoth'].name} destroyed` : reason === 'retreat' ? 'Raid aborted' : reason === 'timeup' ? 'Time is up' : 'Base overrun';
   openModal(`
     <div class="brief">
       <div class="brief-head">
@@ -123,5 +130,5 @@ function raidStatus() {
   const boss = B.units.find(u => ENEMIES[u.type].raidBoss);
   const pct = boss ? Math.round(boss.hp / boss.max * 100) : 0;
   const t = Math.ceil(R.t);
-  return `Behemoth ${pct}% · ${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
+ return `${boss ? ENEMIES[boss.type].name : 'Boss'} ${pct}% · ${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
 }

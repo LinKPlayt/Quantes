@@ -50,6 +50,15 @@ function migrate(s) {
   if (!s.theme) s.theme = 'forest';
   if (!s.boosts) s.boosts = {};
   if (!s.ach) s.ach = {};
+  if (s.oil == null) s.oil = 0;
+  if (!s.armory) s.armory = {};
+  if (!s.gear) s.gear = [];
+  if (!s.items) s.items = {};
+  if (!s.cosmetic) s.cosmetic = { hq: 'classic', flag: 'red', camo: 'standard', owned: ['hq:classic', 'flag:red', 'camo:standard'] };
+  if (!s.world) s.world = { owned: {}, contested: null };
+  if (!s.layouts) s.layouts = [];
+  if (s.settings && s.settings.music == null) Object.assign(s.settings, { music: 0.5, sfx: 1, colorblind: false, bigtext: false, lefty: false });
+  if (!s.stance) s.stance = 'hold';
   if (s.settings && s.settings.lowfx == null) s.settings.lowfx = false;
   if (s.tut == null) s.tut = (s.bestWave > 0 || s.buildings.length > 6) ? 99 : 0;
   return s;
@@ -119,12 +128,13 @@ function storageCap() {
   return cap;
 }
 
-function canAfford(c) { return S.gold >= c.gold && S.steel >= c.steel; }
-function pay(c) { S.gold -= c.gold; S.steel -= c.steel; }
+function canAfford(c) { return S.gold >= (c.gold || 0) && S.steel >= (c.steel || 0) && (S.oil || 0) >= (c.oil || 0); }
+function pay(c) { S.gold -= c.gold || 0; S.steel -= c.steel || 0; S.oil = (S.oil || 0) - (c.oil || 0); }
 function refund(c, frac) {
   const cap = storageCap();
-  S.gold = Math.min(cap, S.gold + Math.floor(c.gold * frac));
-  S.steel = Math.min(cap, S.steel + Math.floor(c.steel * frac));
+  S.gold = Math.min(cap, S.gold + Math.floor((c.gold || 0) * frac));
+  S.steel = Math.min(cap, S.steel + Math.floor((c.steel || 0) * frac));
+  S.oil = Math.min(cap, (S.oil || 0) + Math.floor((c.oil || 0) * frac));
 }
 
 function rebuildGrid() {
@@ -162,6 +172,7 @@ function buildingAtTile(tx, ty) {
 function buildStatus(type) {
   const hqL = hqLevel();
   if (LIMITS[type][hqL] === 0) return { ok: false, locked: true, reason: `Unlocks at HQ ${unlockLevel(type)}` };
+  if (DEFS[type].event && !(S.unlockedDeco || []).includes(type)) return { ok: false, locked: true, reason: 'Event reward' };
   if (countOf(type) >= limitOf(type)) return { ok: false, reason: hqL < MAX_HQ ? 'Limit reached. Upgrade HQ for more' : 'Limit reached' };
   const cost = costFor(type, 1);
   if (!canAfford(cost)) return { ok: false, reason: 'Not enough resources', cost };
@@ -192,6 +203,7 @@ function startJob(b, to) {
 function completeJob(b) {
   b.level = b.job.to;
   b.job = null;
+  orderEvent('upgrade', 1);
   const c = centerOf(b);
   burst(c.x, c.y - 10, '#f2b632', 18);
   Sound.play('done');
@@ -328,15 +340,15 @@ function collect(b, silent) {
   const space = storageCap() - S[kind];
   const amt = Math.floor(Math.min(b.stored, space));
   if (amt <= 0) {
-    if (!silent && b.stored >= 1) { toast(`${kind === 'gold' ? 'Gold' : 'Steel'} storage is full. Build or upgrade a Supply Depot`, 'bad'); Sound.play('error'); }
+    if (!silent && b.stored >= 1) { toast(`${kind === 'gold' ? 'Gold' : kind === 'oil' ? 'Oil' : 'Steel'} storage is full. Build or upgrade a Supply Depot`, 'bad'); Sound.play('error'); }
     return 0;
   }
   S[kind] += amt;
-  if (kind === 'gold') S.stats.collectedGold += amt;
+  if (kind === 'gold') { S.stats.collectedGold += amt; orderEvent('collect', amt); }
   Sound.play('collect'); buzz(10);
   b.stored -= amt;
   const c = centerOf(b);
-  floaters.push({ x: c.x, y: c.y - 30, text: `+${fmt(amt)}`, color: kind === 'gold' ? '#f5c542' : '#c4d3e0', life: 1.2, max: 1.2 });
+  floaters.push({ x: c.x, y: c.y - 30, text: `+${fmt(amt)}`, color: kind === 'gold' ? '#f5c542' : kind === 'oil' ? '#9aa3b5' : '#c4d3e0', life: 1.2, max: 1.2 });
   for (let i = 0; i < 8; i++) particles.push({ x: c.x, y: c.y - 20, vx: (Math.random() - 0.5) * 120, vy: -60 - Math.random() * 90, g: 260, life: 0.7, max: 0.7, r: 3, color: kind === 'gold' ? '#f5c542' : '#a9b6c1' });
   pulseRes(kind);
   return amt;
@@ -385,8 +397,9 @@ function confirmPlace() {
     const b = byId(placing.moveId);
     b.x = placing.x; b.y = placing.y;
     placing = null;
+    showPlaceCtrl(false);
     rebuildGrid();
-    select(b.id);
+    select(editMode ? null : b.id);
     save();
     return;
   }
@@ -478,6 +491,11 @@ canvas.addEventListener('pointerdown', e => {
   pointers.set(e.pointerId, { x: e.offsetX, y: e.offsetY });
   if (pointers.size === 1) {
     const w = screenToWorld(e.offsetX, e.offsetY);
+    // edit mode: grab any building and drag it straight away
+    if (editMode && !placing && !B) {
+      const eb = buildingAtTile(Math.floor(w.x / TILE), Math.floor(w.y / TILE));
+      if (eb) { startMove(eb); hidePanel(); }
+    }
     if (placing && hitsGhost(w)) {
       gesture = { mode: 'drag', offX: w.x / TILE - placing.x, offY: w.y / TILE - placing.y, moved: false };
     } else {
@@ -525,6 +543,10 @@ canvas.addEventListener('pointermove', e => {
 function endPointer(e) {
   if (!pointers.has(e.pointerId)) return;
   pointers.delete(e.pointerId);
+  if (editMode && placing && placing.moveId && gesture && gesture.mode === 'drag' && pointers.size === 0) {
+    if (placing.valid) confirmPlace(); else { cancelPlace(); toast('That spot is blocked', 'bad'); }
+    select(null); gesture = null; return;
+  }
   if (gesture && gesture.mode === 'pan' && !gesture.moved && pointers.size === 0 && e.type === 'pointerup') {
     tap(e.offsetX, e.offsetY);
   }
@@ -617,6 +639,8 @@ function update(dt) {
   if (!S.drop && now >= S.nextDrop && !B) spawnDrop();
   if (S.research.job && now >= S.research.job.end) finishResearch();
   if (S.army.queue.length && now >= S.army.queue[0].end) processTraining(now);
+  processCrafting(now);
+  if (!B) updateWorld(now);
   if (!B) updateObstacles(now);
   for (const b of S.buildings) {
     if (b.job && now >= b.job.end && !B) completeJob(b);
@@ -715,9 +739,9 @@ function draw() {
   list.sort((a, b) => (a.y + DEFS[a.type].size) - (b.y + DEFS[b.type].size) || a.x - b.x);
   for (const b of list) {
     let nb = null;
-    if (b.type === 'wall') {
+    if (b.type === 'wall' || b.type === 'gate') {
       const r = buildingAtTile(b.x + 1, b.y), d = buildingAtTile(b.x, b.y + 1);
-      const link = o => o && o.type === 'wall' && o.level >= 1 && !o._dead && !(placing && placing.moveId === o.id);
+      const link = o => o && (o.type === 'wall' || o.type === 'gate') && o.level >= 1 && !o._dead && !(placing && placing.moveId === o.id);
       nb = { r: link(r), d: link(d) };
     }
     if (b._dead) { if (!isPassive(b.type)) drawRubble(ctx, b); continue; }
@@ -894,6 +918,7 @@ function frame(now) {
     draw();
     updateHUD();
     updateBattleHUD();
+    Music.setMode(B ? 'battle' : 'base');
     if (placing) positionPlaceCtrl();
     if (now - lastPanel > 250) { lastPanel = now; refreshPanel(); }
   } catch (e) {
@@ -908,6 +933,7 @@ function frame(now) {
 const $ = sel => document.querySelector(sel);
 const ICON = {
   gold: '<svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="11" r="8" fill="#b88a1c"/><circle cx="10" cy="10" r="8" fill="#f5c542"/><circle cx="7.5" cy="7.5" r="2.2" fill="#fff1b0"/></svg>',
+  oil: '<svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2c3 4 5 7 5 10a5 5 0 0 1-10 0c0-3 2-6 5-10z" fill="#30343d" stroke="#9aa3b5" stroke-width="1.2"/><path d="M8 11a2.5 2.5 0 0 0 2 3" stroke="#6b7280" stroke-width="1.4" fill="none" stroke-linecap="round"/></svg>',
   steel: '<svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M2 15h16l-3-7H5z" fill="#4f5961"/><path d="M5 8h10l-2-4H7z" fill="#a9b6c1"/></svg>',
   hammer: '<svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M11 4l5 5-2 2-5-5z" fill="#c9b27a"/><path d="M8.5 7.5l3 3-7 7-3-3z" fill="#7a5c3d"/><path d="M9 3h5l3 3-2 1-3-2H9z" fill="#9aa5ad"/></svg>',
   medal: '<svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M6 1h3l1 5-3 1zM14 1h-3l-1 5 3 1z" fill="#c8402a"/><circle cx="10" cy="12" r="6.5" fill="#b9851a"/><circle cx="10" cy="12" r="5" fill="#f2b632"/><path d="M10 8.6l1 2.1 2.3.3-1.7 1.6.4 2.3-2-1.1-2 1.1.4-2.3-1.7-1.6 2.3-.3z" fill="#fff1b0"/></svg>',
@@ -930,6 +956,7 @@ function costHTML(c) {
   const parts = [];
   if (c.gold) parts.push(`<span class="cost ${S.gold < c.gold ? 'short' : ''}">${ICON.gold}${fmt(c.gold)}</span>`);
   if (c.steel) parts.push(`<span class="cost ${S.steel < c.steel ? 'short' : ''}">${ICON.steel}${fmt(c.steel)}</span>`);
+  if (c.oil) parts.push(`<span class="cost ${(S.oil || 0) < c.oil ? 'short' : ''}">${ICON.oil}${fmt(c.oil)}</span>`);
   if (!parts.length) parts.push('<span class="cost">Free</span>');
   return parts.join('');
 }
@@ -942,7 +969,9 @@ function setText(el, key, v) { if (hudCache[key] !== v) { hudCache[key] = v; el.
 
 function updateHUD() {
   const cap = storageCap();
-  for (const k of ['gold', 'steel']) {
+  const showOil = hqLevel() >= 5 || (S.oil || 0) > 0;
+  if (hudCache.showOil !== showOil) { hudCache.showOil = showOil; $('#res-oil').hidden = !showOil; }
+  for (const k of (showOil ? ['gold', 'steel', 'oil'] : ['gold', 'steel'])) {
     setText($(`#res-${k} .amt`), k, fmt(S[k]));
     setText($(`#res-${k} .cap`), k + 'cap', `/ ${fmt(cap)}`);
     const pct = Math.min(100, (S[k] / cap) * 100).toFixed(1);
@@ -960,7 +989,9 @@ function updateHUD() {
   const gift = loginClaimable();
   if (hudCache.gift !== gift) { hudCache.gift = gift; $('#btn-gift').classList.toggle('has-dot', gift); }
   updateTutorial();
-  const ready = claimableMissions() + achClaimable();
+  const ready = claimableMissions() + achClaimable() + ordersClaimable();
+  const hubDot = loginClaimable() || chestClaimable() > 0 || Object.keys(HEROES).some(id => heroUnlocked(id) && skillPoints(id) > 0);
+  if (hudCache.hub !== hubDot) { hudCache.hub = hubDot; $('#btn-hub').classList.toggle('has-dot', hubDot); }
   const cc = chestClaimable();
   if (hudCache.chest !== cc) { hudCache.chest = cc; $('#btn-chest').classList.toggle('has-dot', cc > 0); }
   setText($('#btn-missions .dot'), 'mdot', ready ? String(ready) : '');
@@ -1093,6 +1124,7 @@ function buildPanel(b, up) {
     }
     actions += `<button class="btn ghost" data-act="move">Move</button>`;
     if (b.type === 'hq') actions += `<button class="btn ghost" data-act="roadmap">Roadmap</button>`;
+    if (b.type === 'workshop' && b.level >= 1) actions += `<button class="btn" data-act="workshop"><span class="btn-main">Craft</span><span class="btn-sub">${(S.craft || []).length ? `${S.craft.length} in production` : 'Ready'}</span></button>`;
     if (b.type === 'barracks' && b.level >= 1) actions += `<button class="btn" data-act="barracks"><span class="btn-main">Train</span><span class="btn-sub">Army ${armySpace()}/${armyCapacity()}</span></button>`;
     if (b.type === 'lab' && b.level >= 1) actions += `<button class="btn medal-btn" data-act="research"><span class="btn-main">Research</span><span class="btn-sub">${S.research.job ? fmtTime((S.research.job.end - Date.now()) / 1000) : 'Ready'}</span></button>`;
     if (b.type !== 'hq') {
@@ -1130,6 +1162,7 @@ panel.addEventListener('click', e => {
   else if (act === 'roadmap') { openRoadmap(); return; }
   else if (act === 'research') { openResearch(); return; }
   else if (act === 'barracks') { openBarracks(); return; }
+  else if (act === 'workshop') { openWorkshop(); return; }
   else if (act === 'spec') { openSpec(b); return; }
   else if (act === 'priority') {
     const i = PRIORITIES.findIndex(p => p.id === (b.priority || 'close'));
@@ -1273,6 +1306,7 @@ function openBattleBrief() {
         <h2>Hold the line</h2>
         <p>Enemy waves keep coming down the roads, each one bigger than the last. Every kill and every wave you survive pays out. Damage is repaired after the battle.</p>
       </div>
+      <div class="faction-line" style="--fc:${currentFaction().color}"><b>This week: ${currentFaction().name}</b> led by ${currentFaction().commander}. ${currentFaction().rule}.</div>
       <h3 class="report-h">Threat level</h3>
       <div class="thr-row">${threats}</div>
       <div class="brief-cols">
@@ -1330,6 +1364,17 @@ $('#btn-menu').addEventListener('click', () => {
         <button class="btn ghost" id="btn-record">Service record</button>
         <button class="btn ghost" id="btn-backup">Backup</button>
         <button class="btn ghost toggle ${S.settings.lowfx ? 'on' : ''}" id="btn-lowfx">Battery saver: ${S.settings.lowfx ? 'On' : 'Off'}</button>
+        <button class="btn ghost" id="btn-wardrobe">Wardrobe</button>
+        <button class="btn ghost" id="btn-layouts">Layouts</button>
+      </div>
+      <div class="settings-row slider-row">
+        <label class="field-label" for="vol-music">Music</label><input type="range" id="vol-music" min="0" max="1" step="0.05" value="${S.settings.music}">
+        <label class="field-label" for="vol-sfx">Effects</label><input type="range" id="vol-sfx" min="0" max="1" step="0.05" value="${S.settings.sfx}">
+      </div>
+      <div class="settings-row">
+        <button class="btn ghost toggle ${S.settings.colorblind ? 'on' : ''}" data-acc="colorblind">Colorblind mode: ${S.settings.colorblind ? 'On' : 'Off'}</button>
+        <button class="btn ghost toggle ${S.settings.bigtext ? 'on' : ''}" data-acc="bigtext">Large text: ${S.settings.bigtext ? 'On' : 'Off'}</button>
+        <button class="btn ghost toggle ${S.settings.lefty ? 'on' : ''}" data-acc="lefty">Left-handed: ${S.settings.lefty ? 'On' : 'Off'}</button>
       </div>
       <div class="settings-row theme-row">
         <span class="field-label">Map theme</span>
@@ -1353,6 +1398,14 @@ $('#btn-menu').addEventListener('click', () => {
   $('#btn-recenter').addEventListener('click', () => { recenter(); closeModal(); });
   $('#btn-record').addEventListener('click', openRecord);
   $('#btn-backup').addEventListener('click', openBackup);
+  $('#btn-wardrobe').addEventListener('click', openWardrobe);
+  $('#btn-layouts').addEventListener('click', openLayouts);
+  $('#vol-music').addEventListener('input', e => { S.settings.music = +e.target.value; applySettings(); save(); });
+  $('#vol-sfx').addEventListener('input', e => { S.settings.sfx = +e.target.value; applySettings(); save(); Sound.play('click'); });
+  $('#modal-body').querySelectorAll('[data-acc]').forEach(b => b.addEventListener('click', () => {
+    const k = b.dataset.acc; S.settings[k] = !S.settings[k]; applySettings(); save();
+    b.classList.toggle('on', S.settings[k]); b.textContent = b.textContent.replace(/: (On|Off)$/, `: ${S.settings[k] ? 'On' : 'Off'}`);
+  }));
   $('#btn-lowfx').addEventListener('click', e => {
     S.settings.lowfx = !S.settings.lowfx; save();
     e.currentTarget.textContent = `Battery saver: ${S.settings.lowfx ? 'On' : 'Off'}`; e.currentTarget.classList.toggle('on', S.settings.lowfx);
@@ -1378,6 +1431,9 @@ $('#btn-menu').addEventListener('click', () => {
 function applySettings() {
   Sound.enabled = S.settings.sound;
   hapticsOn = S.settings.haptics;
+  Sound.setSfx(S.settings.sfx == null ? 1 : S.settings.sfx);
+  Music.setVolume(S.settings.music == null ? 0.5 : S.settings.music);
+  applyAccessibility();
 }
 
 /* ----- Walls and traps: upgrade a whole set ----- */
@@ -1436,6 +1492,7 @@ function rewardText(r) {
   const parts = [];
   if (r.gold) parts.push(`${ICON.gold}${fmt(r.gold)}`);
   if (r.steel) parts.push(`${ICON.steel}${fmt(r.steel)}`);
+  if (r.oil) parts.push(`${ICON.oil}${fmt(r.oil)}`);
   if (r.medals) parts.push(`${ICON.medal}${r.medals}`);
   return parts.map(p => `<span class="cost">${p}</span>`).join('');
 }
@@ -1457,12 +1514,13 @@ function openMissions() {
     </li>`).join('');
   openModal(`
     <div class="settings">
-      <div class="m-head"><h2>Missions</h2><div class="tabs"><button class="tab on">Missions</button><button class="tab" id="tab-ach">Achievements${achClaimable() ? ` (${achClaimable()})` : ''}</button></div><span class="m-count">${doneCount} / ${MISSIONS.length}</span></div>
+      <div class="m-head"><h2>Missions</h2><div class="tabs"><button class="tab on">Missions</button><button class="tab" id="tab-ach">Achievements${achClaimable() ? ` (${achClaimable()})` : ''}</button><button class="tab" id="tab-orders">Daily orders${ordersClaimable() ? ` (${ordersClaimable()})` : ''}</button></div><span class="m-count">${doneCount} / ${MISSIONS.length}</span></div>
       <ul class="missions">${list || '<li class="mission"><div class="m-text">Every mission is complete. Outstanding work, Commander.</div></li>'}</ul>
       <div class="settings-row"><button class="btn" data-close>Done</button></div>
     </div>`);
   $('#modal-body').querySelectorAll('[data-claim]').forEach(btn => btn.addEventListener('click', () => claimMission(btn.dataset.claim)));
   $('#tab-ach').addEventListener('click', openAchievements);
+  $('#tab-orders').addEventListener('click', openOrders);
 }
 function claimMission(id) {
   const m = MISSIONS.find(x => x.id === id);
@@ -1758,7 +1816,7 @@ function start(hotData) {
   let saved = hotData && hotData.save ? load(hotData.save) : null;
   if (!saved) { try { saved = load(localStorage.getItem(SAVE_KEY)); } catch (e) { saved = null; } }
   S = saved || newBase();
-  if (saved) applyOffline((Date.now() - (S.saved || Date.now())) / 1000);
+  if (saved) { const away = Date.now() - (S.saved || Date.now()); applyOffline(away / 1000); checkSurpriseAttack(away); }
   rebuildGrid();
   applySettings();
   initBattleUI();
@@ -1771,7 +1829,10 @@ function start(hotData) {
   $('#btn-gift').addEventListener('click', () => { if (!B) { Sound.play('click'); openLogin(); } });
   $('#btn-chest').addEventListener('click', () => { if (!B) { Sound.play('click'); openChest(); } });
   $('#medals').addEventListener('click', () => { if (!B) { Sound.play('click'); openQuartermaster(); } });
-  setTimeout(() => { if (!B && modal.hidden) maybeShowWhatsNew(); }, 700);
+  setTimeout(() => { if (!B && modal.hidden && !showSurpriseReport() && !maybeShowWhatsNew2()) maybeShowWhatsNew(); }, 700);
+  $('#btn-hub').addEventListener('click', () => { Sound.play('click'); openHub(); });
+  $('#edit-done').addEventListener('click', () => setEditMode(false));
+  Music.start();
   setTimeout(() => { if (!B && loginClaimable() && S.tut >= 99 && modal.hidden) openLogin(); }, 1500);
   resize();
   recenter();

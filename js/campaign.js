@@ -106,7 +106,7 @@ function openCampaign() {
       </button>
       <button class="daily-card raid-card ${raidUnlocked() ? '' : 'done'}" id="btn-raid">
         <span class="daily-tag">Boss raid</span>
-        <span class="daily-name">The Behemoth</span>
+        <span class="daily-name">The ${ENEMIES[raidBossType()].name}</span>
         <span class="daily-mods"><span>Best this week ${Math.round(raidState().best * 100)}%</span></span>
         <span class="daily-meta">${raidUnlocked() ? `${RAID.timeLimit} seconds to deal as much damage as you can. New week starts Monday.` : 'Unlocks at Command Center 3'}</span>
       </button>
@@ -184,6 +184,16 @@ function replayReward(m) {
 function endMission(reason) {
   B.over = true;
   const m = B.mission;
+  if (m.practice) {
+    openModal(`
+      <div class="brief">
+        <div class="brief-head"><span class="stamp">Firing Range</span><h2>Practice over</h2>
+        <p>${reason === 'victory' ? 'Your layout handled every target.' : 'Your layout was overwhelmed. Damage in practice is reduced, so a real battle would be harder.'} ${B.kills} enemies destroyed.</p></div>
+        <div class="brief-foot"><button class="btn" id="btn-fr-again">Run again</button><button class="btn ghost" data-close>Return to base</button></div>
+      </div>`, leaveBattle);
+    $('#btn-fr-again').addEventListener('click', () => { closeModal(); openFiringRange(); });
+    return;
+  }
   const i = CAMPAIGN.indexOf(m);
   const h = hq();
   const frac = h && h._maxhp ? Math.max(0, h._hp / h._maxhp) : 0;
@@ -192,7 +202,7 @@ function endMission(reason) {
   let stars = 0, reward = null, firstClear = false;
   if (won) {
     stars = campaignStars(frac);
-    firstClear = m.daily ? !dailyDone() : !prev;
+    firstClear = m.outpost ? true : m.daily ? !dailyDone() : !prev;
     reward = m.daily ? (firstClear ? m.reward : { gold: 0, steel: 0, medals: 0 }) : firstClear ? m.reward : replayReward(m);
     if (m.daily) { if (firstClear) S.stats.dailies = (S.stats.dailies || 0) + 1; S.daily.done = dayKey(); }
     B.battleStars += m.daily ? (firstClear ? 8 : 2) : stars * 2;
@@ -200,14 +210,22 @@ function endMission(reason) {
     const g = Math.min(reward.gold || 0, Math.max(0, cap - S.gold)), st = Math.min(reward.steel || 0, Math.max(0, cap - S.steel));
     S.gold += g; S.steel += st; S.medals += reward.medals || 0;
     reward = { gold: g, steel: st, medals: reward.medals || 0 };
-    if (!m.daily) campaignState().stars[m.id] = Math.max(prev, stars);
+    if (m.outpost) outpostWon(m);
+    else if (!m.daily) campaignState().stars[m.id] = Math.max(prev, stars);
+    orderEvent('mission', 1);
+    eventTokens(10);
+    // gear drops: first daily win, and three stars on a campaign mission for the first time
+    if ((m.daily && firstClear) || (!m.daily && !m.outpost && stars === 3 && prev < 3)) {
+      const gi = dropGear(m.daily ? 0 : 1);
+      setTimeout(() => toast(`Gear found: ${gi.name} (${GEAR_TIERS.find(t => t.id === gi.tier).name})`, 'good'), 700);
+    }
     addXP(firstClear ? 60 + Math.max(0, i) * 20 : 20);
     buzz([60, 40, 60]);
   } else {
     Sound.play('lose');
   }
   save();
-  const next = m.daily ? null : CAMPAIGN[i + 1];
+  const next = m.daily || m.outpost ? null : CAMPAIGN[i + 1];
   const title = won ? 'Mission complete' : reason === 'retreat' ? 'Mission aborted' : 'Mission failed';
   const line = won
     ? `${m.name} is secure. The Command Center finished at ${Math.round(frac * 100)}% strength.`
@@ -247,5 +265,5 @@ function endMission(reason) {
   const nx = $('#btn-next-mission');
   if (nx) nx.addEventListener('click', () => { closeModal(); openMissionBrief(i + 1); });
   const rt = $('#btn-retry-mission');
-  if (rt) rt.addEventListener('click', () => { closeModal(); openMissionBrief(m.daily ? -1 : i); });
+  if (rt) rt.addEventListener('click', () => { closeModal(); if (m.outpost) openWorldMap(); else openMissionBrief(m.daily ? -1 : i); });
 }

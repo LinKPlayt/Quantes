@@ -20,9 +20,10 @@ function loadout() {
 }
 
 function abilityCooldown(k) {
-  if (k === 'airstrike') return Math.max(10, ABILITIES.airstrike.cooldown - 2 * researchLevel('airpower'));
-  if (k === 'repair') return Math.max(15, ABILITIES.repair.cooldown - 3 * researchLevel('medicine'));
-  return ABILITIES[k].cooldown;
+  const m = B && B.bonus ? B.bonus.cd : 1;
+  if (k === 'airstrike') return Math.max(10, ABILITIES.airstrike.cooldown - 2 * researchLevel('airpower')) * m;
+  if (k === 'repair') return Math.max(15, ABILITIES.repair.cooldown - 3 * researchLevel('medicine')) * m;
+  return ABILITIES[k].cooldown * m;
 }
 
 function abilityBlocked(k) {
@@ -95,6 +96,7 @@ function useAbility(k) {
     if (B.targeting) banner(ABILITIES[k].name, 'Tap the map to choose the target');
     return;
   }
+  orderEvent('ability', 1);
   if (k === 'repair') useRepair();
   else if (k === 'emp') useEmp();
 }
@@ -104,6 +106,8 @@ function fireTargeted(k, w) {
   B.targeting = null;
   document.body.classList.remove('targeting');
   $('#banner').hidden = true;
+  if (jammedAt(w.x, w.y)) { toast('Signal jammed. Destroy the Jammer Truck first', 'bad'); Sound.play('error'); return; }
+  orderEvent('ability', 1);
   B.ab[k] = abilityCooldown(k);
   if (k === 'airstrike') callAirstrike(w);
   else if (k === 'artillery') callArtillery(w);

@@ -34,13 +34,16 @@ function startBattle(mission) {
     sentries: [], hero: null, firstWaveEarly: 0,
     troops: [], deployed: {}, smokes: [], reinforceCd: 0, deployPick: null, rallyMode: false, lost: 0,
     streak: 0, streakT: 0, bestStreak: 0, battleStars: 0,
+    bonus: freshBonus(), cards: [], paused: false, overdrive: 0, heroDrones: [],
+    practice: !!(mission && mission.practice), faction: !mission ? currentFaction() : null,
   };
   // threat level (endless only), weather and time of day
   const threat = !mission ? (THREATS.find(t => t.id === S.threat) || THREATS[1]) : THREATS[1];
   B.threat = threat;
   B.weather = pickWeighted(WEATHER);
   B.daytime = mission && mission.raid ? DAYTIME[0] : pickWeighted(DAYTIME);
-  B.lootMul = (mission ? 1 : threat.loot) * B.daytime.loot;
+  B.lootMul = B.practice ? 0 : (mission ? 1 : threat.loot) * B.daytime.loot;
+  for (const b of S.buildings) b._released = false;
   B.ab.hero = 4;
   if (!B.mods.noHero) B.hero = spawnHero();
   if (mission && mission.raid) startRaid(mission);
@@ -64,7 +67,7 @@ function startWave(n) {
   B.wave = n;
   B.phase = 'fight';
   const q = [];
-  const comp = B.mission ? B.mission.waves[n - 1] : waveComposition(n);
+  const comp = B.mission ? B.mission.waves[n - 1] : factionComposition(waveComposition(n), n);
   for (const g of comp) for (let i = 0; i < Math.round(g.count * (B.mods.swarm ? 2 : 1)); i++) q.push(g.type);
   // keep a few riflemen up front, shuffle the rest so heavy units arrive mixed in
   const head = q.splice(0, 3);
@@ -228,7 +231,9 @@ function computeFlow() {
 /* ---------------- Update ---------------- */
 
 function battleUpdate(dt) {
-  if (!B || B.over) return;
+  if (!B || B.over || B.paused) return;
+  if (B.overdrive > 0) B.overdrive -= dt;
+  updateHeroDrones(dt);
   if (B.flowDirty) computeFlow();
   if (B.reinforceCd > 0) B.reinforceCd -= dt;
   if (B.streakT > 0) { B.streakT -= dt; if (B.streakT <= 0) B.streak = 0; }
@@ -294,7 +299,7 @@ function spawnEnemy(type) {
   const lvl = B.mission ? B.mission.level + B.wave - 1 : B.wave;
   const eliteChance = e.boss ? 0 : (B.mission ? (lvl >= 8 ? 0.06 : 0) : (B.wave >= 6 ? B.threat.elite : 0));
   const elite = Math.random() < eliteChance;
-  const hp = e.raidBoss ? raidBossHp() : Math.round(enemyHp(type, lvl) * (B.mods.armored || 1) * (B.mods.swarm ? 0.55 : 1) * (B.mission ? 1 : B.threat.hp) * (elite ? ELITE.hp : 1));
+  const hp = e.raidBoss ? Math.round(raidBossHp() * (type === 'skyfortress' ? 0.6 : 1)) : Math.round(enemyHp(type, lvl) * (B.mods.armored || 1) * (B.mods.swarm ? 0.55 : 1) * (B.mission ? 1 : B.threat.hp) * (elite ? ELITE.hp : 1) * (B.mission ? 1 : factionHp(type)));
   B.units.push({
     elite, dmgK: e.raidBoss ? raidBossDmgK() : 1,
     type, x: p.x + (Math.random() - 0.5) * 24, y: p.y + (Math.random() - 0.5) * 24,
@@ -309,6 +314,9 @@ function waveCleared() {
   if (B.hero) addHeroXP(B.hero.id, 10 + n * 2);
   S.stats.wavesCleared = (S.stats.wavesCleared || 0) + 1;
   if (!B.mission) B.battleStars += n >= 10 ? 2 : 1;
+  orderEvent('waves', 1);
+  eventTokens(B.mission ? 1 : 2);
+  if (!B.mission && n % 5 === 0) setTimeout(() => { if (B && !B.over) offerWaveCards(); }, 1200);
   if (B.mission) {
     B.waves = n;
     addXP(15 * n);
@@ -353,7 +361,7 @@ function distToBuilding(x, y, b) {
 function nearestBuilding(x, y, range, skipWalls) {
   let best = null, bd = range;
   for (const b of S.buildings) {
-    if (b._dead || isPassive(b.type) || (skipWalls && b.type === 'wall')) continue;
+    if (b._dead || isPassive(b.type) || (skipWalls && (b.type === 'wall' || b.type === 'gate'))) continue;
     const d = distToBuilding(x, y, b);
     if (d <= bd) { bd = d; best = b; }
   }
@@ -368,6 +376,10 @@ function updateEnemy(u, dt) {
   u.slow = B.weather && B.weather.slow ? B.weather.slow : 1;
   u.smoked = B.smokes.length > 0 && inSmoke(u.x, u.y);
   if (u.smoked) u.slow *= 0.5;
+  if (e.stealth) updateStealth(u);
+  if (e.supplyAura) supplyPulse(u, dt);
+  if (u.boostT > 0) { u.boostT -= dt; u.slow *= 1.2; }
+  if (u.air && B.faction && B.faction.airSpeed) u.slow *= B.faction.airSpeed;
   const dmgMul = (u.elite ? ELITE.dmg : 1) * (u.dmgK || 1) * (u.smoked && Math.random() < 0.5 ? 0 : 1);
   if (!u.air && !e.vehicle) {
     const tile = buildingAtTile(Math.floor(u.x / TILE), Math.floor(u.y / TILE));
@@ -473,7 +485,7 @@ function updateEnemy(u, dt) {
         B.shots.push({ kind: u.type === 'heli' ? 'enemy-rocket' : 'enemy-shell', x: u.x, y: u.y - (u.air ? 30 : 0), sx: u.x, sy: u.y - (u.air ? 30 : 0), tx: hx, ty: hy, t: 0, dur, arc, dmg: e.dmg * dmgMul, bTarget: u.tgt, big: e.lob || e.boss });
         if (e.lob || e.boss || u.type === 'tank') { Sound.play('cannon'); B.fx.push({ kind: 'light', x: u.x + Math.cos(u.aim) * 20, y: u.y + Math.sin(u.aim) * 20, r: 26, life: 0.1, max: 0.1 }); }
       } else {
-        damageBuilding(u.tgt, e.dmg * dmgMul);
+        damageBuilding(u.tgt, e.dmg * dmgMul * (e.wallBreaker && (u.tgt.type === "wall" || u.tgt.type === "gate") ? e.wallBreaker : 1));
         Sound.play('rifle');
         B.fx.push({ kind: 'tracer', x1: u.x, y1: u.y - (u.air ? 18 : 2), x2: hx, y2: hy, life: 0.07, color: '#ff9a6a' });
       }
@@ -498,8 +510,9 @@ function updateEnemy(u, dt) {
   if (u.healFx > 0) u.healFx -= dt;
 }
 
-function damageBuilding(b, dmg) {
+function damageBuilding(b, dmg, attacker) {
   if (!b || b._dead) return;
+  if (B.practice) dmg *= 0.5;
   b._hp -= dmg;
   if (b._hp <= 0) {
     b._hp = 0;
@@ -529,6 +542,7 @@ function damageEnemy(u, dmg, src) {
   if (u.hp <= 0) return;
   const ed = ENEMIES[u.type];
   if (ed.armor) dmg = Math.max(dmg * 0.25, dmg - ed.armor);
+  if (u.air && B.bonus && B.bonus.antiAir) dmg *= 1 + B.bonus.antiAir;
   if (src) B.dmgBy[src] = (B.dmgBy[src] || 0) + Math.min(dmg, u.hp);
   if (B.raid && ed.raidBoss) raidHit(u, Math.min(dmg, u.hp));
   u.hp -= dmg;
@@ -536,7 +550,12 @@ function damageEnemy(u, dmg, src) {
   if (dmg >= 120) floaters.push({ x: u.x + (Math.random() - 0.5) * 10, y: u.y - 24, text: String(Math.round(dmg)), color: '#ffe08a', life: 0.8, max: 0.8, size: dmg >= 400 ? 18 : 13 });
   if (u.hp <= 0) {
     B.kills++;
+    if (B.practice) { if (ed.vehicle || ed.air) explosion(u.x, u.y, ed.r * 1.6); return; }
     S.stats.kills++;
+    orderEvent('kill', 1);
+    if (u.air) orderEvent('killair', 1);
+    if (ed.vehicle) orderEvent('killveh', 1);
+    if (Math.random() < 0.04) eventTokens(1);
     if (B.hero) addHeroXP(B.hero.id, src === 'hero' ? 4 : 1);
     const e = ENEMIES[u.type];
     addXP(e.boss ? 40 : 1);
@@ -565,7 +584,7 @@ function damageEnemy(u, dmg, src) {
       explosion(u.x, u.y, 60); Sound.play('bigboom'); buzz([100, 50, 150]);
       banner('Siege Tank destroyed', `+${e.bounty} gold`);
     } else if (e.vehicle || e.air) Sound.play('boom');
-    addLoot('gold', e.bounty);
+    addLoot('gold', e.bounty * (1 + (B.bonus ? B.bonus.loot : 0)));
     if (e.vehicle || e.air) addLoot('steel', Math.round(e.bounty * 0.6));
     if (e.vehicle || e.air) {
       explosion(u.x, u.y, e.r * 1.6);
@@ -653,6 +672,11 @@ function weaponOf(b) {
   const vr = vetRank(b.kills);
   if (vr) w.dmg *= 1 + VET_RANKS[vr - 1].bonus;
   if (b._aura) { w.fireRate *= 1 + b._aura.rate; w.range *= 1 + b._aura.range; }
+  if (B && B.bonus) {
+    w.dmg *= 1 + B.bonus.dmgAll + (B.bonus.dmgType[b.type] || 0);
+    w.fireRate *= 1 + B.bonus.rate + (B.overdrive > 0 ? 0.5 : 0);
+    w.range *= 1 + B.bonus.range;
+  }
   if (B && B.weather) w.range *= B.weather.range;
   return w;
 }
@@ -666,6 +690,7 @@ function updateDefense(b, dt) {
   const inRange = u => {
     if (u.hp <= 0) return false;
     if (w.targets === 'air' ? !u.air : (u.air && w.targets !== 'both')) return false;
+    if (ENEMIES[u.type].stealth && !u.revealed) return false;
     const d = Math.hypot(u.x - c.x, u.y - c.y) / TILE;
     return d <= w.range && d >= (w.minRange || 0);
   };
@@ -710,6 +735,11 @@ function updateDefense(b, dt) {
       Sound.play('mg');
       damageEnemy(t, w.dmg, b.type);
       B.fx.push({ kind: 'tracer', x1: b.type === 'hq' ? c.x : mx, y1: b.type === 'hq' ? c.y - 40 : my, x2: t.x, y2: t.y - (t.air ? 18 : 2), life: 0.06, color: '#ffe08a' });
+      break;
+    case 'watchtower':
+      Sound.play('rifle');
+      damageEnemy(t, w.dmg, 'watchtower');
+      B.fx.push({ kind: 'tracer', x1: c.x, y1: c.y - 30, x2: t.x, y2: t.y - (t.air ? 18 : 2), life: 0.1, color: '#e8f7ff', width: 1.5 });
       break;
     case 'sniper':
       Sound.play('sniper');
@@ -934,6 +964,7 @@ function splashDamage(x, y, radiusTiles, dmg, hitsAir, src) {
 // Taps on the map during battle: aim an ability, deploy troops, set a rally point, or move the hero.
 function battleTap(w) {
   if (!B) return;
+  if (B.targeting && B.targeting.startsWith('item:')) { fireItemAt(B.targeting.slice(5), w); return; }
   if (B.targeting) { fireTargeted(B.targeting, w); return; }
   if (B.deployPick) { deployAt(B.deployPick, w); return; }
   if (B.rallyMode) { rallyTo(w); clearDeployPick(); return; }
@@ -1043,17 +1074,21 @@ const INFANTRY_LOOK = {
   sapper:    { body: '#8a6a3a', helmet: '#4a3820', gun: 0, tnt: true },
   flamer:    { body: '#4a3a30', helmet: '#2a201a', gun: 10, tanks: true },
   heavy:     { body: '#55524c', helmet: '#2e2c29', gun: 14, armor: true },
+  stealth:   { body: '#23262a', helmet: '#15171a', gun: 12 },
 };
 
 function drawEnemy(ctx, u) {
   const e = ENEMIES[u.type];
   const white = u.hit > 0;
+  const ghost = e.stealth && !u.revealed;
+  if (ghost) ctx.globalAlpha = 0.28;
   ctx.save();
   ctx.translate(u.x, u.y);
   if (u.air) drawAirUnit(ctx, u, e, white);
   else if (e.vehicle) drawVehicle(ctx, u, e, white);
   else drawInfantry(ctx, u, e, white);
   ctx.restore();
+  if (ghost) { ctx.globalAlpha = 1; return; }
   drawEnemyBar(ctx, u, e);
 }
 
@@ -1129,6 +1164,29 @@ function drawVehicle(ctx, u, e, white) {
     if (u.flash > 0) { ctx.rotate(u.aim); ctx.fillStyle = '#ffd36b'; ctx.beginPath(); ctx.arc(12, 0, 2.5, 0, Math.PI * 2); ctx.fill(); }
     return;
   }
+  if (t === 'bulldozer') {
+    ctx.fillStyle = '#211c19'; rr(ctx, -16, -12, 32, 6, 2); ctx.fill(); rr(ctx, -16, 6, 32, 6, 2); ctx.fill();
+    hullBox(ctx, 26, 18, '#c9a646', white);
+    if (!white) { ctx.fillStyle = '#7a6326'; rr(ctx, -10, -6, 12, 12, 2); ctx.fill(); }
+    ctx.fillStyle = white ? '#fff' : '#8a8c90'; ctx.beginPath(); ctx.moveTo(14, -14); ctx.lineTo(22, -12); ctx.lineTo(22, 12); ctx.lineTo(14, 14); ctx.closePath(); ctx.fill();
+    ctx.restore();
+    return;
+  }
+  if (t === 'jammer' || t === 'supply') {
+    for (const wx of [-9, 0, 9]) { wheel(ctx, wx, -8.5, 6, 3.5); wheel(ctx, wx, 8.5, 6, 3.5); }
+    hullBox(ctx, 28, 15, t === 'jammer' ? '#4a4f55' : '#6b5a3a', white);
+    if (!white) {
+      ctx.fillStyle = '#3a3f45'; rr(ctx, 7, -7, 8, 14, 2); ctx.fill();
+      if (t === 'jammer') {
+        ctx.strokeStyle = '#9aa3b5'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(-6, 0); ctx.lineTo(-6, -14); ctx.stroke();
+        ctx.strokeStyle = `rgba(200,64,42,${0.4 + Math.sin(tSec * 8) * 0.3})`; ctx.beginPath(); ctx.arc(-6, -14, 6 + (tSec * 20) % 10, 0, Math.PI * 2); ctx.stroke();
+      } else {
+        ctx.fillStyle = '#e9e4d4'; ctx.fillRect(-12, -5, 14, 10); ctx.fillStyle = PAL.red; ctx.fillRect(-6, -4, 2, 8); ctx.fillRect(-9, -1, 8, 2);
+      }
+    }
+    ctx.restore();
+    return;
+  }
   if (t === 'jeep') {
     for (const [wx, wy] of [[-8, -8], [7, -8], [-8, 8], [7, 8]]) wheel(ctx, wx, wy, 7, 4);
     hullBox(ctx, 24, 15, ENEMY_COL.hull, white);
@@ -1190,6 +1248,7 @@ function drawVehicle(ctx, u, e, white) {
 }
 
 function drawAirUnit(ctx, u, e, white) {
+  if (u.type === 'skyfortress') { drawSkyFortress(ctx, u, e, white); return; }
   const heli = u.type === 'heli';
   const alt = heli ? 30 : 18;
   ctx.fillStyle = 'rgba(0,0,0,0.22)'; ctx.beginPath(); ctx.ellipse(alt * 0.35, alt * 0.45, heli ? 20 : 10, heli ? 9 : 5, u.angle, 0, Math.PI * 2); ctx.fill();
@@ -1468,4 +1527,33 @@ function drawBehemoth(ctx, u, e, white) {
   ctx.fillStyle = 'rgba(255,255,255,0.12)'; ctx.beginPath(); ctx.arc(-4, -4, 9, 0, Math.PI * 2); ctx.fill();
   ctx.fillStyle = '#ff5a3c'; ctx.beginPath(); ctx.arc(6, 0, 3, 0, Math.PI * 2); ctx.fill();
   if (u.flash > 0) { ctx.fillStyle = '#ffd36b'; ctx.beginPath(); ctx.arc(53, -6.5, 8, 0, Math.PI * 2); ctx.arc(53, 6.5, 8, 0, Math.PI * 2); ctx.fill(); }
+}
+
+/* ----- The Sky Fortress: a flying battleship (raid boss) ----- */
+function drawSkyFortress(ctx, u, e, white) {
+  const alt = 46;
+  ctx.fillStyle = 'rgba(0,0,0,0.22)'; ctx.beginPath(); ctx.ellipse(alt * 0.4, alt * 0.5, 54, 26, u.angle, 0, Math.PI * 2); ctx.fill();
+  ctx.translate(0, -alt + Math.sin(tSec * 1.2) * 3);
+  ctx.save(); ctx.rotate(u.angle);
+  // envelope
+  const g = ctx.createLinearGradient(0, -24, 0, 24);
+  g.addColorStop(0, white ? '#fff' : '#8a7a68'); g.addColorStop(1, white ? '#fff' : '#4a3d33');
+  ctx.fillStyle = g; ctx.beginPath(); ctx.ellipse(0, 0, 54, 22, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = 'rgba(0,0,0,0.25)'; ctx.lineWidth = 1;
+  for (let i = -3; i <= 3; i++) { ctx.beginPath(); ctx.ellipse(i * 12, 0, 2, 21, 0, 0, Math.PI * 2); ctx.stroke(); }
+  // fins
+  ctx.fillStyle = '#3a2f27';
+  ctx.beginPath(); ctx.moveTo(-46, -8); ctx.lineTo(-62, -22); ctx.lineTo(-54, -4); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(-46, 8); ctx.lineTo(-62, 22); ctx.lineTo(-54, 4); ctx.fill();
+  // gondola with guns
+  ctx.fillStyle = '#2b2420'; rr(ctx, -18, -7, 36, 14, 4); ctx.fill();
+  ctx.fillStyle = '#c8402a'; ctx.fillRect(-14, -2, 28, 4);
+  for (const gx of [-10, 0, 10]) { ctx.fillStyle = '#1b1612'; ctx.beginPath(); ctx.arc(gx, 9, 3, 0, Math.PI * 2); ctx.fill(); }
+  // propellers
+  for (const [px, py] of [[-30, -22], [-30, 22], [20, -21], [20, 21]]) {
+    ctx.save(); ctx.translate(px, py); ctx.rotate(tSec * 30 + px);
+    ctx.fillStyle = 'rgba(220,220,210,0.35)'; ctx.fillRect(-7, -1.2, 14, 2.4); ctx.restore();
+  }
+  ctx.restore();
+  if (u.flash > 0) { ctx.fillStyle = '#ffd36b'; ctx.beginPath(); ctx.arc(0, 12, 6, 0, Math.PI * 2); ctx.fill(); }
 }

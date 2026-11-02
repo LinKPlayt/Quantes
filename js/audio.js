@@ -52,7 +52,7 @@ const Sound = (() => {
     try {
       ac = new AC();
       master = ac.createGain();
-      master.gain.value = 0.5;
+      master.gain.value = 0.5 * (typeof sfxVol === 'number' ? sfxVol : 1);
       master.connect(ac.destination);
       noiseBuf = ac.createBuffer(1, ac.sampleRate, ac.sampleRate);
       const d = noiseBuf.getChannelData(0);
@@ -128,7 +128,9 @@ const Sound = (() => {
     if (!v && keepAlive) keepAlive.pause();
   }
 
-  return { unlock, play, set enabled(v) { setEnabled(v); }, get enabled() { return enabled; } };
+  let sfxVol = 1;
+  function setSfx(v) { sfxVol = v; if (master) master.gain.value = 0.5 * v; }
+  return { unlock, play, setSfx, get ctx() { return ac; }, get enabled() { return enabled; }, set enabled(v) { setEnabled(v); } };
 })();
 
 let hapticsOn = true;
@@ -173,3 +175,49 @@ function buzz(ms) {
 for (const ev of ['pointerdown', 'pointerup', 'touchend', 'click', 'keydown']) {
   window.addEventListener(ev, () => Sound.unlock(), { capture: true, passive: true });
 }
+
+/* ---------------- Music: a small generative soundtrack ---------------- */
+// Calm chords at the base, a driving pulse in battle. Everything is synthesized.
+const Music = (() => {
+  let gain = null, timer = null, step = 0, mode = 'base', vol = 0.5, next = 0;
+  const CHORDS = [[57, 60, 64], [53, 57, 60], [48, 52, 55], [55, 59, 62]]; // Am F C G
+  const hz = n => 440 * Math.pow(2, (n - 69) / 12);
+  function note(ac, f, t, dur, type, v) {
+    const o = ac.createOscillator(), g = ac.createGain();
+    o.type = type; o.frequency.value = f;
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(v, t + Math.min(0.05, dur / 3)); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g); g.connect(gain); o.start(t); o.stop(t + dur + 0.05);
+  }
+  function kick(ac, t, v) {
+    const o = ac.createOscillator(), g = ac.createGain();
+    o.frequency.setValueAtTime(110, t); o.frequency.exponentialRampToValueAtTime(40, t + 0.15);
+    g.gain.setValueAtTime(v, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.2);
+    o.connect(g); g.connect(gain); o.start(t); o.stop(t + 0.25);
+  }
+  function tick() {
+    const ac = Sound.ctx;
+    if (!ac || ac.state !== 'running' || vol <= 0 || !Sound.enabled) return;
+    if (!gain) { gain = ac.createGain(); gain.connect(ac.destination); }
+    gain.gain.value = vol * 0.22;
+    const beat = mode === 'battle' ? 0.24 : 0.5;
+    if (next < ac.currentTime) next = ac.currentTime + 0.05;
+    while (next < ac.currentTime + 0.4) {
+      const bar = Math.floor(step / 8) % 4, chord = CHORDS[bar], i = step % 8;
+      if (mode === 'battle') {
+        if (i % 2 === 0) kick(ac, next, 0.7);
+        note(ac, hz(chord[0] - 24), next, beat * 0.9, 'sawtooth', 0.12);
+        if (i === 3 || i === 7) note(ac, hz(chord[i === 3 ? 1 : 2] + 12), next, beat * 1.5, 'square', 0.05);
+      } else {
+        if (i === 0) for (const n of chord) note(ac, hz(n), next, beat * 7.5, 'triangle', 0.06);
+        if (i % 2 === 0) note(ac, hz(chord[(i / 2) % 3] + 12), next, beat * 1.6, 'sine', 0.05);
+        if (i === 0) note(ac, hz(chord[0] - 12), next, beat * 4, 'sine', 0.09);
+      }
+      next += beat; step++;
+    }
+  }
+  return {
+    setMode(m) { if (m !== mode) { mode = m; step = 0; } },
+    setVolume(v) { vol = v; if (gain) gain.gain.value = v * 0.22; },
+    start() { if (!timer) timer = setInterval(tick, 150); },
+  };
+})();

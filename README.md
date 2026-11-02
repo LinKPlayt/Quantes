@@ -115,6 +115,15 @@ The first major update, 22 features built on research into Clash of Clans, Boom 
 21. **Battery saver**: lighter effects and a lower frame rate.
 22. **What's new** screen for returning players.
 
+## Update 2.0: Iron Front
+
+**Army:** Armory upgrades per troop type · four new troops (Flame Squad, Combat Engineer, Mortar Team, Attack Helicopter) · troop stances (Hold, Attack, Guard hero) · Guard Posts that release free soldiers.
+**Heroes:** skill trees (Firepower, Toughness, Tactics) · gear (weapon, armor, charm) from raids, three-star missions and dailies · new hero Spc. Ryo, the Drone Operator.
+**Battle:** wave upgrades every five endless waves · Gates and Watchtowers · Bulldozers, Stealth Commandos, Jammer Trucks, Supply Trucks · weekly enemy factions · Sky Fortress raid boss (alternates with the Behemoth) · surprise attacks while you are away · Firing Range practice mode.
+**Base and economy:** Oil and the Oil Derrick (vehicles, helicopters, levels 9+) · World map with seven capturable outposts · three saved layouts and drag-anything edit mode · Workshop consumables (Mine Refill, Med Kit, Overdrive, Sandbag Drop, Smoke Charge, Fuel Bomb).
+**Meta and polish:** daily orders · monthly events with tokens and an exclusive shop · Wardrobe (HQ skins, flags, troop camo) · generative music with volume sliders · colorblind mode, large text and a left-handed layout.
+Most new screens live under the Operations button in the top bar.
+
 ## Code layout
 
 - `js/data.js` – building stats, costs, limits per HQ level, wave previews
@@ -124,6 +133,7 @@ The first major update, 22 features built on research into Clash of Clans, Boom 
 - `js/arsenal.js` – abilities, loadout and their battle effects
 - `js/raid.js` – the weekly Behemoth boss raid
 - `js/meta.js` – War Chest, achievements, Quartermaster, obstacles, themes, backups, what's new
+- `js/frontline.js` – Update 2 systems: wave upgrades, factions, Workshop, daily orders, events, Wardrobe, layouts, surprise attacks, Firing Range, world map, Operations hub
 - `js/hero.js` – heroes: movement, combat, abilities, levels and the hero screen
 - `js/campaign.js` – campaign missions: operation map, briefings, results and stars
 - `js/battle.js` – battle mode: waves, enemy pathing (flow field), turret fire, rewards
